@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "yarss"
+version = "0.1.0"
+description = "Yet Another Robotics Simulation System: robot description loaders"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = ["trimesh>=4.6", "pycollada>=0.9"]
+
+[project.optional-dependencies]
+mjcf = ["mujoco>=3.3,<4"]
+usd = ["usd-core>=25.5"]
+all = ["mujoco>=3.3,<4", "usd-core>=25.5"]
+dev = ["ruff"]
+assets = ["xacro==2.1.1"]
+
+[tool.setuptools.packages.find]
+include = ["yarss*"]
+
+[tool.ruff]
+indent-width = 2
+line-length = 100
+
+[tool.ruff.format]
+indent-style = "space"
