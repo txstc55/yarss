@@ -3,7 +3,9 @@
 from dataclasses import dataclass, field
 from typing import ClassVar
 
-from ..transforms import IDENTITY, Matrix4, Vector3
+import numpy as np
+
+from ..transforms import Matrix4, Vector3
 
 
 @dataclass
@@ -45,9 +47,9 @@ class Joint:
   name: str
   parent: str | None
   child: str | None
-  parent_frame: Matrix4 = IDENTITY
-  child_frame: Matrix4 = IDENTITY
-  axis: Vector3 = (1.0, 0.0, 0.0)
+  parent_frame: Matrix4 = field(default_factory=lambda: np.eye(4))
+  child_frame: Matrix4 = field(default_factory=lambda: np.eye(4))
+  axis: Vector3 = field(default_factory=lambda: np.array([1.0, 0.0, 0.0]))
   limits: dict[str, JointLimit] = field(default_factory=dict)
   mimic: Mimic | None = None
   enabled: bool = True

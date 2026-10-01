@@ -2,6 +2,8 @@
 
 from pathlib import Path
 
+import numpy as np
+
 from ..joints import (
   ContinuousJoint,
   FixedJoint,
@@ -13,7 +15,7 @@ from ..joints import (
 )
 from ..parts import Geometry, Part
 from ..robot import Robot
-from ..transforms import multiply, transform
+from ..transforms import transform
 
 
 def _generated_name(prefix: str, index: int, used: set[str]) -> str:
@@ -26,10 +28,7 @@ def _generated_name(prefix: str, index: int, used: set[str]) -> str:
 
 
 def load_mjcf(path: Path) -> Robot:
-  try:
-    import mujoco
-  except ImportError as error:
-    raise ImportError('MJCF loading requires: pip install "yarss[mjcf]"') from error
+  import mujoco
 
   # Recent MuJoCo versions dispatch by extension and do not recognize .mjcf.
   # A virtual .xml name keeps includes/assets relative to the original folder.
@@ -72,7 +71,10 @@ def load_mjcf(path: Path) -> Robot:
       world_geometry.append(shape)
       continue
     part = robot.parts[names[body_id]]
-    part.visuals.append(shape)
+    # MuJoCo shows groups 0, 1, and 2 by default. FR3 puts its separate
+    # collision meshes in group 3; drawing both produces overlapping surfaces.
+    if 0 <= model.geom_group[geom_id] <= 2:
+      part.visuals.append(shape)
     if model.geom_contype[geom_id] or model.geom_conaffinity[geom_id] or geom_id in paired_geoms:
       part.collisions.append(shape)
   robot.metadata["world_geometry"] = world_geometry
@@ -108,9 +110,9 @@ def load_mjcf(path: Path) -> Robot:
         model.joint(joint_id).name or _generated_name("joint", joint_id, joint_names),
         parent,
         child,
-        parent_frame=multiply(body_pose, anchor),
+        parent_frame=body_pose @ anchor,
         child_frame=anchor,
-        axis=tuple(float(v) for v in model.jnt_axis[joint_id]),
+        axis=model.jnt_axis[joint_id].copy(),
         metadata={
           "order_in_body": joint_id - start,
           "stiffness": float(model.jnt_stiffness[joint_id]),
@@ -118,9 +120,7 @@ def load_mjcf(path: Path) -> Robot:
       )
       address = int(model.jnt_qposadr[joint_id])
       width = 7 if kind is FloatingJoint else 4 if kind is SphericalJoint else 1
-      joint.metadata["reference_position"] = tuple(
-        float(v) for v in model.qpos0[address : address + width]
-      )
+      joint.metadata["reference_position"] = model.qpos0[address : address + width].copy()
       if limited:
         lower, upper = (float(v) for v in model.jnt_range[joint_id])
         key = "angle" if kind is SphericalJoint else "position"
@@ -146,9 +146,7 @@ def _geometry(model, geom_id: int, mujoco) -> Geometry:
     mesh_id = int(model.geom_dataid[geom_id])
     first = int(model.mesh_vertadr[mesh_id])
     count = int(model.mesh_vertnum[mesh_id])
-    shape.vertices = tuple(
-      tuple(float(v) for v in point) for point in model.mesh_vert[first : first + count]
-    )
+    shape.vertices = model.mesh_vert[first : first + count].astype(np.float64, copy=True)
     first = int(model.mesh_faceadr[mesh_id])
     count = int(model.mesh_facenum[mesh_id])
     shape.faces = tuple(

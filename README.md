@@ -4,25 +4,29 @@ This first version loads robot descriptions into a shared `Robot` containing
 `Part` objects and typed `Joint` connections. It extracts geometry, default
 poses, joint frames, axes, and limits. Joint motion and physics are placeholders.
 
-## Setup and test
+## Setup and MJCF preview
 
-From this repository:
+From the outer repository folder:
 
 ```bash
-python -m venv .venv
-.venv/bin/python -m pip install -e '.[all]'
-.venv/bin/python scripts/test_loaders.py
+./yarss/install.sh
+python3 example/viewer/view_robot.py
 ```
 
-Python 3.10+ is required. URDF uses Python's XML reader, trimesh for mesh files,
-and pycollada for COLLADA geometry. The `mjcf` and `usd` extras install MuJoCo
-and OpenUSD respectively; `all` installs both. Neither a GUI nor a GPU is needed.
-The examples are included, so the checks run offline after installation.
+The installer installs the single package `yarss` into your current Python 3
+installation. It does not create a virtual environment. MuJoCo and PyVista are
+standard dependencies and install automatically. Python 3.10+ is required.
 
-The test script checks real assets and temporary descriptions covering joint
-types, units, transforms, mesh data, includes/references, and invalid inputs.
-It also checks the gripper's wrist attachment across formats and opens and closes
-both fingers using native MuJoCo without a viewer.
+The inner `yarss/` folder is the installable package: it contains the Python code,
+`pyproject.toml`, and `install.sh`. The installer runs `python3 -m pip install -e .`
+from that folder. Editable mode makes code edits take effect without reinstalling.
+You import the installed package with `import yarss`. The second command opens
+the complete FR3 arm and gripper.
+
+URDF uses Python's XML reader, trimesh for mesh files,
+and pycollada for COLLADA geometry. NumPy handles matrices and mesh vertices.
+The optional `usd` dependency group adds OpenUSD for USD loading.
+The example assets are included and load offline after installation.
 
 | Bundled example | Parts | Joints |
 | --- | ---: | ---: |
@@ -51,9 +55,12 @@ Asset sources and licenses are recorded in [example/data/README.md](example/data
 ## Package layout
 
 ```text
-YARSS/
-├── pyproject.toml
-├── yarss/
+yarss/                     # Repository
+├── yarss/                 # Installable Python package
+│   ├── install.sh
+│   ├── pyproject.toml
+│   ├── README.md
+│   ├── __init__.py
 │   ├── loader/
 │   │   ├── loader.py       # Loader and load_robot entry points
 │   │   ├── urdf.py
@@ -64,11 +71,12 @@ YARSS/
 │   │   └── ...            # One file per joint subclass
 │   ├── parts/part.py      # Part and Geometry
 │   ├── robot/robot.py     # Parts and their joint graph
+│   ├── viewer/viewer.py   # General PyVista viewer; add_robot adds every part's visuals
 │   └── transforms.py      # Static pose conversion helpers
-├── example/data/           # Freely licensed robot and gripper assets
-└── scripts/
-    ├── test_loaders.py
-    └── generate_fr3_urdf.py
+└── example/
+    ├── data/              # Freely licensed robot and gripper assets
+    └── viewer/
+        └── view_robot.py  # Load an MJCF robot and preview all its parts
 ```
 
 ## Loading a robot
@@ -124,6 +132,64 @@ Without `usd_root`, all rigid bodies and standard physics joints in the stage
 are collected. USD part/joint names are full prim paths to avoid collisions.
 Empty USD joint endpoints and MJCF world attachments are represented by `None`.
 
+## Viewing an MJCF robot
+
+After the setup above, open the bundled FR3 arm and gripper in PyVista:
+
+```bash
+python3 example/viewer/view_robot.py
+```
+
+Drag to orbit and scroll to zoom. Every part is shown at its loaded world pose:
+visual geometry uses translucent gray surfaces, and collision shapes use orange
+wireframes. Use the **Collision meshes** checkbox in the bottom-left corner to
+toggle the collision overlay. Hiding it restores opaque visual surfaces.
+Joints are not drawn. To load another MJCF file:
+
+```bash
+python3 example/viewer/view_robot.py /path/to/robot.xml
+```
+
+`Viewer()` creates a PyVista plotter with its default window size and empty mesh
+lists. Load the robot separately, add it to the viewer, then render:
+
+```python
+from yarss import load_robot
+from yarss.viewer import Viewer
+
+robot = load_robot("example/data/mjcf/franka_fr3/fr3.xml")
+viewer = Viewer()
+viewer.add_robot(robot)
+viewer.show()
+```
+
+`add_robot()` appends the visual geometry from every part to `viewer.meshes`.
+It appends collision geometry to `viewer.collision_meshes`. It preserves meshes
+already in either list. The viewer stores no single robot; other PyVista meshes
+can also be appended in world coordinates. `show()` renders both lists, making
+the visual surfaces translucent while collision shapes are visible. Use
+`viewer.show(show_collisions=False)` to start with the collision overlay hidden;
+the checkbox can still turn it on.
+
+Parts without geometry, such as the FR3's empty root frame, add no meshes.
+Joint definitions are not used to draw anything; each part already has its world
+transform from the loader. Joint visualization and motion are separate work.
+
+For each geometry, the viewer computes:
+
+```python
+world = part.transform @ geometry.transform
+world_vertices = geometry.vertices @ world[:3, :3].T + world[:3, 3]
+```
+
+The second line applies the matrix to an entire `N x 3` array of vertices.
+`Part.transform` already includes all ancestors, so their matrices must not be
+applied again. The viewer leaves the source geometry and transforms unchanged.
+It draws `Part.visuals` in a neutral color; source materials are not imported.
+For MJCF, that list follows MuJoCo's [default visible groups 0, 1, and 2](https://mujoco.readthedocs.io/en/stable/XMLreference.html#body-geom-group).
+The FR3's separate collision shapes use group 3 and are stored in `Part.collisions`;
+the viewer draws these as orange wireframes, including the finger pad boxes.
+
 ## Joint classes
 
 Every type directly subclasses `Joint`; each file describes its intended
@@ -153,13 +219,15 @@ URDF descriptions are separately checked to be one connected tree.
 
 - `Part.visuals` and `Part.collisions` contain `Geometry` objects. Geometry-free
   links are retained because joints can connect through them.
-- Meshes contain `vertices` and `faces`. URDF meshes also retain `mesh_path`.
+- Mesh vertices are NumPy arrays of shape `(N, 3)`. Faces are tuples of vertex
+  indices, allowing variable-length polygons. URDF meshes also retain `mesh_path`.
   USD polygons remain polygons; primitives remain shape/dimension records.
 - `Part.transform` maps part coordinates to world coordinates at the file's
   default pose. `Geometry.transform` maps geometry coordinates to part coordinates.
   Joint anchor matrices map the joint frame into each endpoint's part frame.
-- Matrices use column vectors. `part.transform @ geometry.transform @ vertex`
-  gives the world vertex when using a matrix library. Mesh scale is already
+- Transforms are NumPy arrays of shape `(4, 4)` and use column vectors.
+  `part.transform @ geometry.transform @ [x, y, z, 1]` gives a homogeneous
+  world vertex. Joint axes are NumPy arrays of shape `(3,)`. Mesh scale is already
   accounted for in either the geometry matrix or compiled vertices.
 - Lengths are in meters and angles in radians. USD stage units are converted;
   its up axis is retained in `robot.metadata['up_axis']`. USD part matrices
@@ -190,13 +258,6 @@ cylinders, and cones. Unsupported robot geometry raises an error.
 
 Xacro files must be expanded to URDF before loading.
 The bundled FR3 URDF is already expanded from the manufacturer's included source.
-To regenerate it without installing ROS:
-
-```bash
-.venv/bin/python -m pip install -e '.[assets]'
-.venv/bin/python scripts/generate_fr3_urdf.py
-```
-
 The complete MJCF is included directly. The native MuJoCo gripper actuator is
 `fr3_actuator8`: control 0 closes it, and 255 opens it fully.
 
@@ -216,6 +277,6 @@ Use two spaces per indentation level, never tab characters. EditorConfig and
 Ruff are configured to preserve this convention, including for Python.
 
 ```bash
-.venv/bin/python -m pip install -e '.[dev]'
-.venv/bin/ruff format yarss scripts
+python3 -m pip install -e './yarss[dev]'
+python3 -m ruff format --config yarss/pyproject.toml yarss example/viewer
 ```

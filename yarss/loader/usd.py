@@ -3,6 +3,8 @@
 from math import isfinite, radians
 from pathlib import Path
 
+import numpy as np
+
 from ..joints import (
   ContinuousJoint,
   D6Joint,
@@ -15,16 +17,15 @@ from ..joints import (
 )
 from ..parts import Geometry, Part
 from ..robot import Robot
-from ..transforms import multiply, transform
+from ..transforms import transform
 
 
 def _matrix(matrix, meters: float):
   # Gf matrices use row vectors; YARSS uses column vectors. Only translation
   # needs unit conversion here; vertices/dimensions are converted separately.
-  return tuple(
-    tuple(float(matrix[j][i]) * (meters if j == 3 and i < 3 else 1) for j in range(4))
-    for i in range(4)
-  )
+  result = np.array(matrix, dtype=float).T.copy()
+  result[:3, 3] *= meters
+  return result
 
 
 def _quaternion(value):
@@ -122,11 +123,10 @@ def load_usd(path: Path, root_path: str | None) -> Robot:
       owner = owner.GetParent()
     if not owner:
       continue  # Environment geometry is not a robot part.
-    relative = (
-      cache.GetLocalToWorldTransform(prim) * cache.GetLocalToWorldTransform(owner).GetInverse()
-    )
-    shape = _geometry(prim, _matrix(relative, meters), meters, UsdGeom)
     part = robot.parts[str(owner.GetPath())]
+    world = _matrix(cache.GetLocalToWorldTransform(prim), meters)
+    relative = np.linalg.solve(part.transform, world)
+    shape = _geometry(prim, relative, meters, UsdGeom)
     if UsdGeom.Imageable(prim).ComputeVisibility() != UsdGeom.Tokens.invisible:
       part.visuals.append(shape)
     if (
@@ -136,14 +136,14 @@ def load_usd(path: Path, root_path: str | None) -> Robot:
       part.collisions.append(shape)
 
   def anchor(body_name, target, position, rotation):
-    local = transform(tuple(float(v) * meters for v in position), _quaternion(rotation))
+    local = transform(np.asarray(position) * meters, _quaternion(rotation))
     if target is None:
       return local
-    body = body_prims[body_name]
-    relative = (
-      cache.GetLocalToWorldTransform(target) * cache.GetLocalToWorldTransform(body).GetInverse()
+    relative = np.linalg.solve(
+      robot.parts[body_name].transform,
+      _matrix(cache.GetLocalToWorldTransform(target), meters),
     )
-    return multiply(_matrix(relative, meters), local)
+    return relative @ local
 
   for prim in joint_prims:
     name = str(prim.GetPath())
@@ -154,7 +154,7 @@ def load_usd(path: Path, root_path: str | None) -> Robot:
       name,
       parent,
       child,
-      axis=axis,
+      axis=np.array(axis, dtype=float),
       limits=limits,
       parent_frame=anchor(
         parent, target0, schema.GetLocalPos0Attr().Get(), schema.GetLocalRot0Attr().Get()
@@ -234,7 +234,7 @@ def _geometry(prim, pose, meters: float, geom) -> Geometry:
       raise ValueError(f"Invalid USD mesh topology at {prim.GetPath()}")
     if any(i < 0 or i >= len(points) for i in indices):
       raise ValueError(f"Invalid USD mesh vertex index at {prim.GetPath()}")
-    shape.vertices = tuple(tuple(float(v) * meters for v in p) for p in points)
+    shape.vertices = np.asarray(points, dtype=float).reshape(-1, 3) * meters
     faces, offset = [], 0
     for count in counts:
       faces.append(tuple(int(v) for v in indices[offset : offset + count]))

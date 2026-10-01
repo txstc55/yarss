@@ -3,7 +3,10 @@
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from ..transforms import IDENTITY, Matrix4, Vector3
+import numpy as np
+from numpy.typing import NDArray
+
+from ..transforms import Matrix4
 
 
 @dataclass
@@ -16,10 +19,10 @@ class Geometry:
   """
 
   kind: str
-  transform: Matrix4 = IDENTITY
+  transform: Matrix4 = field(default_factory=lambda: np.eye(4))
   parameters: dict[str, object] = field(default_factory=dict)
   mesh_path: Path | None = None
-  vertices: tuple[Vector3, ...] = ()
+  vertices: NDArray[np.float64] = field(default_factory=lambda: np.empty((0, 3)))
   faces: tuple[tuple[int, ...], ...] = ()
   source: str | None = None
 
@@ -36,5 +39,5 @@ class Part:
   name: str
   visuals: list[Geometry] = field(default_factory=list)
   collisions: list[Geometry] = field(default_factory=list)
-  transform: Matrix4 = IDENTITY
+  transform: Matrix4 = field(default_factory=lambda: np.eye(4))
   metadata: dict[str, object] = field(default_factory=dict)

@@ -1,10 +1,11 @@
 """Read URDF links, geometry, and joint definitions using the standard library."""
 
 from collections import deque
-from math import isfinite, sqrt
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 from xml.etree import ElementTree as ET
+
+import numpy as np
 
 from ..joints import (
   ContinuousJoint,
@@ -18,7 +19,7 @@ from ..joints import (
 )
 from ..parts import Geometry, Part
 from ..robot import Robot
-from ..transforms import IDENTITY, multiply, rpy_quaternion, transform
+from ..transforms import Vector3, rpy_quaternion, transform
 
 JOINT_TYPES = {
   "fixed": FixedJoint,
@@ -30,9 +31,9 @@ JOINT_TYPES = {
 }
 
 
-def vector(text: str, count: int = 3) -> tuple[float, ...]:
-  values = tuple(float(v) for v in text.split())
-  if len(values) != count or not all(isfinite(v) for v in values):
+def vector(text: str, count: int = 3) -> Vector3:
+  values = np.array([float(v) for v in text.split()])
+  if len(values) != count or not np.isfinite(values).all():
     raise ValueError(f"Expected {count} finite numbers, found {text!r}")
   return values
 
@@ -40,7 +41,7 @@ def vector(text: str, count: int = 3) -> tuple[float, ...]:
 def origin(element: ET.Element):
   node = element.find("origin")
   if node is None:
-    return IDENTITY
+    return np.eye(4)
   return transform(
     vector(node.get("xyz", "0 0 0")), rpy_quaternion(vector(node.get("rpy", "0 0 0")))
   )
@@ -83,9 +84,7 @@ def geometry(element: ET.Element, source: Path, packages: dict[str, Path]) -> Ge
     result.source = node.attrib["filename"]
     result.mesh_path = mesh_path(result.source, source, packages)
     result.vertices, result.faces = _read_mesh(result.mesh_path)
-    result.transform = multiply(
-      result.transform, transform(scale=vector(node.get("scale", "1 1 1")))
-    )
+    result.transform = result.transform @ transform(scale=vector(node.get("scale", "1 1 1")))
   elif node.tag == "box":
     result.parameters = {"size": vector(node.attrib["size"])}
   elif node.tag == "cylinder":
@@ -117,7 +116,7 @@ def _read_mesh(path: Path):
         if not isinstance(primitive, collada.triangleset.BoundTriangleSet):
           raise ValueError(f"Unsupported non-surface COLLADA primitive in {path}")
         offset = len(vertices)
-        vertices.extend(tuple(float(v) * meters for v in p) for p in primitive.vertex)
+        vertices.extend(np.asarray(primitive.vertex, dtype=float) * meters)
         faces.extend(tuple(int(i) + offset for i in f) for f in primitive.vertex_index)
   else:
     import trimesh
@@ -125,11 +124,11 @@ def _read_mesh(path: Path):
     mesh = trimesh.load_mesh(path, process=False, skip_materials=True)
     if mesh.units:
       mesh.convert_units("meters")
-    vertices = [tuple(float(v) for v in p) for p in mesh.vertices]
+    vertices = np.array(mesh.vertices, dtype=float, copy=True)
     faces = [tuple(int(i) for i in f) for f in mesh.faces]
-  if not vertices or not faces:
+  if len(vertices) == 0 or not faces:
     raise ValueError(f"No triangle mesh found in {path}")
-  return tuple(vertices), tuple(faces)
+  return np.asarray(vertices, dtype=float), tuple(faces)
 
 
 def load_urdf(path: Path, root: ET.Element, packages: dict[str, Path]) -> Robot:
@@ -158,10 +157,10 @@ def load_urdf(path: Path, root: ET.Element, packages: dict[str, Path]) -> Robot:
     )
     axis = node.find("axis")
     values = vector(axis.get("xyz", "1 0 0") if axis is not None else "1 0 0")
-    length = sqrt(sum(v * v for v in values))
+    length = np.linalg.norm(values)
     if length == 0:
       raise ValueError(f"Joint {joint.name!r} has a zero-length axis")
-    joint.axis = tuple(v / length for v in values)
+    joint.axis = values / length
     limit = node.find("limit")
     if limit is not None:
       limits = {
@@ -210,7 +209,7 @@ def _set_default_poses(robot: Robot) -> None:
       raise ValueError("URDF contains a joint cycle")
     visited.add(name)
     for joint in outgoing[name]:
-      robot.parts[joint.child].transform = multiply(robot.parts[name].transform, joint.parent_frame)
+      robot.parts[joint.child].transform = robot.parts[name].transform @ joint.parent_frame
       pending.append(joint.child)
   if len(visited) != len(robot.parts):
     raise ValueError("URDF contains a disconnected joint cycle")

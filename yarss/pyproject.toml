@@ -8,17 +8,30 @@ version = "0.1.0"
 description = "Yet Another Robotics Simulation System: robot description loaders"
 readme = "README.md"
 requires-python = ">=3.10"
-dependencies = ["trimesh>=4.6", "pycollada>=0.9"]
+dependencies = [
+  "numpy>=1.26",
+  "trimesh>=4.6",
+  "pycollada>=0.9",
+  "mujoco>=3.3,<4",
+  "pyvista>=0.46",
+]
 
 [project.optional-dependencies]
-mjcf = ["mujoco>=3.3,<4"]
 usd = ["usd-core>=25.5"]
-all = ["mujoco>=3.3,<4", "usd-core>=25.5"]
 dev = ["ruff"]
 assets = ["xacro==2.1.1"]
 
-[tool.setuptools.packages.find]
-include = ["yarss*"]
+[tool.setuptools]
+# This directory is the yarss package itself.
+package-dir = {"yarss" = "."}
+packages = [
+  "yarss",
+  "yarss.joints",
+  "yarss.loader",
+  "yarss.parts",
+  "yarss.robot",
+  "yarss.viewer",
+]
 
 [tool.ruff]
 indent-width = 2
