@@ -5,13 +5,13 @@ from pathlib import Path
 import numpy as np
 
 from ..joints import (
-  ContinuousJoint,
+  BallJoint,
   FixedJoint,
   FloatingJoint,
   JointLimit,
-  PrismaticJoint,
-  RevoluteJoint,
-  SphericalJoint,
+  RotatingJoint,
+  SlidingJoint,
+  UnlimitedRotatingJoint,
 )
 from ..parts import Geometry, Part
 from ..robot import Robot
@@ -82,9 +82,9 @@ def load_mjcf(path: Path) -> Robot:
 
   joint_types = {
     mujoco.mjtJoint.mjJNT_FREE: FloatingJoint,
-    mujoco.mjtJoint.mjJNT_BALL: SphericalJoint,
-    mujoco.mjtJoint.mjJNT_SLIDE: PrismaticJoint,
-    mujoco.mjtJoint.mjJNT_HINGE: RevoluteJoint,
+    mujoco.mjtJoint.mjJNT_BALL: BallJoint,
+    mujoco.mjtJoint.mjJNT_SLIDE: SlidingJoint,
+    mujoco.mjtJoint.mjJNT_HINGE: RotatingJoint,
   }
   for body_id in range(1, model.nbody):
     parent = names[int(model.body_parentid[body_id])]
@@ -104,8 +104,8 @@ def load_mjcf(path: Path) -> Robot:
     for joint_id in range(start, start + count):
       kind = joint_types[int(model.jnt_type[joint_id])]
       limited = bool(model.jnt_limited[joint_id])
-      if kind is RevoluteJoint and not limited:
-        kind = ContinuousJoint
+      if kind is RotatingJoint and not limited:
+        kind = UnlimitedRotatingJoint
       anchor = transform(model.jnt_pos[joint_id])
       joint = kind(
         model.joint(joint_id).name or _generated_name("joint", joint_id, joint_names),
@@ -120,13 +120,13 @@ def load_mjcf(path: Path) -> Robot:
         },
       )
       address = int(model.jnt_qposadr[joint_id])
-      width = 7 if kind is FloatingJoint else 4 if kind is SphericalJoint else 1
+      width = 7 if kind is FloatingJoint else 4 if kind is BallJoint else 1
       joint.metadata["reference_position"] = model.qpos0[address : address + width].copy()
       if width == 1:
         joint.position = float(model.qpos0[address])
       if limited:
         lower, upper = (float(v) for v in model.jnt_range[joint_id])
-        key = "angle" if kind is SphericalJoint else "position"
+        key = "angle" if kind is BallJoint else "position"
         joint.limits[key] = JointLimit(lower, upper)
       robot.add_joint(joint)
   # Actuators, tendons, and equality constraints are outside this geometry/

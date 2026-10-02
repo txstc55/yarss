@@ -8,14 +8,14 @@ from xml.etree import ElementTree as ET
 import numpy as np
 
 from ..joints import (
-  ContinuousJoint,
   FixedJoint,
   FloatingJoint,
   JointLimit,
   Mimic,
   PlanarJoint,
-  PrismaticJoint,
-  RevoluteJoint,
+  RotatingJoint,
+  SlidingJoint,
+  UnlimitedRotatingJoint,
 )
 from ..parts import Geometry, Part
 from ..robot import Robot
@@ -23,9 +23,9 @@ from ..transforms import Vector3, rpy_quaternion, transform
 
 JOINT_TYPES = {
   "fixed": FixedJoint,
-  "revolute": RevoluteJoint,
-  "continuous": ContinuousJoint,
-  "prismatic": PrismaticJoint,
+  "revolute": RotatingJoint,
+  "continuous": UnlimitedRotatingJoint,
+  "prismatic": SlidingJoint,
   "planar": PlanarJoint,
   "floating": FloatingJoint,
 }

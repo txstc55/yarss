@@ -1,4 +1,4 @@
-from .continuous import ContinuousJoint
+from .ball import BallJoint
 from .cylindrical import CylindricalJoint
 from .d6 import D6Joint
 from .distance import DistanceJoint
@@ -6,10 +6,10 @@ from .fixed import FixedJoint
 from .floating import FloatingJoint
 from .joint import Joint, JointLimit, Mimic
 from .planar import PlanarJoint
-from .prismatic import PrismaticJoint
-from .revolute import RevoluteJoint
+from .rotating import RotatingJoint
 from .screw import ScrewJoint
-from .spherical import SphericalJoint
+from .sliding import SlidingJoint
+from .unlimited_rotating import UnlimitedRotatingJoint
 from .universal import UniversalJoint
 
 __all__ = [
@@ -17,12 +17,12 @@ __all__ = [
   "JointLimit",
   "Mimic",
   "FixedJoint",
-  "RevoluteJoint",
-  "ContinuousJoint",
-  "PrismaticJoint",
+  "RotatingJoint",
+  "UnlimitedRotatingJoint",
+  "SlidingJoint",
   "PlanarJoint",
   "FloatingJoint",
-  "SphericalJoint",
+  "BallJoint",
   "CylindricalJoint",
   "UniversalJoint",
   "ScrewJoint",

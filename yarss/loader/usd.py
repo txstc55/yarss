@@ -6,14 +6,14 @@ from pathlib import Path
 import numpy as np
 
 from ..joints import (
-  ContinuousJoint,
+  BallJoint,
   D6Joint,
   DistanceJoint,
   FixedJoint,
   JointLimit,
-  PrismaticJoint,
-  RevoluteJoint,
-  SphericalJoint,
+  RotatingJoint,
+  SlidingJoint,
+  UnlimitedRotatingJoint,
 )
 from ..parts import Geometry, Part
 from ..robot import Robot
@@ -186,13 +186,13 @@ def _joint_definition(prim, meters: float, physics):
     factor = radians(1) if angular else meters
     lower = _bound(prim.GetAttribute("physics:lowerLimit").Get(), factor)
     upper = _bound(prim.GetAttribute("physics:upperLimit").Get(), factor)
-    kind = RevoluteJoint if angular else PrismaticJoint
+    kind = RotatingJoint if angular else SlidingJoint
     if angular and lower is None and upper is None:
-      kind = ContinuousJoint
+      kind = UnlimitedRotatingJoint
     if lower is not None or upper is not None:
       limits["position"] = JointLimit(lower, upper)
   elif prim.IsA(physics.SphericalJoint):
-    kind = SphericalJoint
+    kind = BallJoint
     for key in ("coneAngle0Limit", "coneAngle1Limit"):
       value = prim.GetAttribute(f"physics:{key}").Get()
       if value is not None and value >= 0:

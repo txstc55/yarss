@@ -34,8 +34,8 @@ The example assets are included and load offline after installation.
 | Franka Research 3 with parallel gripper, Menagerie-based MJCF | 12 | 12 |
 | Newton cart-pole, USD | 4 | 4 |
 
-Both FR3 examples contain seven revolute arm joints and the Franka Hand's two
-prismatic finger joints. Each finger slides from 0 to 40 mm; the fingers move
+Both FR3 examples contain seven rotating arm joints and the Franka Hand's two
+sliding finger joints. Each finger slides from 0 to 40 mm; the fingers move
 symmetrically for an opening of up to 80 mm. Visual meshes and collision geometry
 are included for the arm, hand, and fingers.
 
@@ -198,12 +198,12 @@ constraints in comments. There are no constraint solvers or motion methods yet.
 | Class | Intended motion | Imported from |
 | --- | --- | --- |
 | `FixedJoint` | No relative motion | URDF, implicit MJCF, USD |
-| `RevoluteJoint` | Limited rotation about one axis | URDF, MJCF hinge, USD |
-| `ContinuousJoint` | Unlimited rotation about one axis | URDF, unlimited MJCF/USD hinge |
-| `PrismaticJoint` | Translation along one axis | URDF, MJCF slide, USD |
+| `RotatingJoint` | Limited rotation about one axis | URDF revolute, MJCF hinge, USD |
+| `UnlimitedRotatingJoint` | Unlimited rotation about one axis | URDF continuous, unlimited MJCF/USD hinge |
+| `SlidingJoint` | Translation along one axis | URDF prismatic, MJCF slide, USD |
 | `PlanarJoint` | Two translations and one rotation in a plane | URDF |
 | `FloatingJoint` | Three translations and three rotations | URDF, MJCF free |
-| `SphericalJoint` | Rotation about a common point | MJCF ball, USD |
+| `BallJoint` | Rotation about a common point | MJCF ball, USD spherical |
 | `DistanceJoint` | Fixed or bounded anchor separation | USD |
 | `D6Joint` | Individually free, limited, or locked axes | USD generic joint |
 | `CylindricalJoint` | Independent slide and spin on one axis | Placeholder |
