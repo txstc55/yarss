@@ -57,6 +57,7 @@ def load_mjcf(path: Path) -> Robot:
       Part(
         name,
         transform=transform(data.xpos[body_id], data.xquat[body_id]),
+        local_transform=transform(model.body_pos[body_id], model.body_quat[body_id]),
         metadata={"mass": float(model.body_mass[body_id])},
       )
     )
@@ -121,6 +122,8 @@ def load_mjcf(path: Path) -> Robot:
       address = int(model.jnt_qposadr[joint_id])
       width = 7 if kind is FloatingJoint else 4 if kind is SphericalJoint else 1
       joint.metadata["reference_position"] = model.qpos0[address : address + width].copy()
+      if width == 1:
+        joint.position = float(model.qpos0[address])
       if limited:
         lower, upper = (float(v) for v in model.jnt_range[joint_id])
         key = "angle" if kind is SphericalJoint else "position"

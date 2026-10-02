@@ -31,8 +31,10 @@ class Geometry:
 class Part:
   """One robot link, including links with no geometry.
 
-  ``transform`` is the part's world transform at the file's default pose.
-  USD scale is retained in this matrix. No runtime state is simulated here.
+  ``transform`` is the part's current world transform, initially the file's default pose.
+  The MJCF loader also stores ``local_transform`` relative to the parent body.
+  The viewer can edit these poses directly; it does not simulate forces.
+  USD scale is retained in the world matrix.
   A geometry may appear in both lists when it serves both purposes.
   """
 
@@ -41,3 +43,4 @@ class Part:
   collisions: list[Geometry] = field(default_factory=list)
   transform: Matrix4 = field(default_factory=lambda: np.eye(4))
   metadata: dict[str, object] = field(default_factory=dict)
+  local_transform: Matrix4 = field(default_factory=lambda: np.eye(4))
