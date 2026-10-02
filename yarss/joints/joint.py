@@ -1,4 +1,4 @@
-"""Joint definitions only; constraint forces and motion are future work."""
+"""Joint definitions and scalar pose editing; constraint forces are future work."""
 
 from dataclasses import dataclass, field
 from typing import ClassVar
@@ -46,16 +46,26 @@ class Joint:
   """
 
   name: str
-  parent: str | None
-  child: str | None
-  parent_frame: Matrix4 = field(default_factory=lambda: np.eye(4))
-  child_frame: Matrix4 = field(default_factory=lambda: np.eye(4))
-  axis: Vector3 = field(default_factory=lambda: np.array([1.0, 0.0, 0.0]))
-  limits: dict[str, JointLimit] = field(default_factory=dict)
+  parent: str | None  # the parent it is attached to
+  child: str | None  # the child it is attached to
+  parent_frame: Matrix4 = field(
+    default_factory=lambda: np.eye(4)
+  )  # where this joint is relative to parent
+  child_frame: Matrix4 = field(
+    default_factory=lambda: np.eye(4)
+  )  # where this joint is relative to child
+  axis: Vector3 = field(
+    default_factory=lambda: np.array([1.0, 0.0, 0.0])
+  )  # the axis along which this joint moves, expressed in the joint frame
+  limits: dict[str, JointLimit] = field(default_factory=dict)  # the limit for this joint
   mimic: Mimic | None = None
   enabled: bool = True
   metadata: dict[str, object] = field(default_factory=dict)
-  position: float = 0.0
+  position: float = 0.0  # this is actually the joint's current value, like the angle, or the displacement along the axis
 
   kind: ClassVar[str] = "joint"
   dof: ClassVar[int | None] = None
+
+  def motion_transform(self) -> Matrix4:
+    """Subclasses define motion from the loaded pose, in joint coordinates."""
+    raise NotImplementedError(f"Pose editing is not implemented for {self.kind} joints")

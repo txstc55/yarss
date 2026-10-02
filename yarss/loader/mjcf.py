@@ -120,10 +120,20 @@ def load_mjcf(path: Path) -> Robot:
         },
       )
       address = int(model.jnt_qposadr[joint_id])
-      width = 7 if kind is FloatingJoint else 4 if kind is BallJoint else 1
-      joint.metadata["reference_position"] = model.qpos0[address : address + width].copy()
-      if width == 1:
-        joint.position = float(model.qpos0[address])
+      if kind is FloatingJoint:
+        joint.initial_pose = transform(
+          model.qpos0[address : address + 3], model.qpos0[address + 3 : address + 7]
+        )
+      elif kind is BallJoint:
+        joint.initial_orientation = transform(quaternion=model.qpos0[address : address + 4])[
+          :3, :3
+        ].copy()
+      elif kind is SlidingJoint:
+        joint.initial_distance = float(model.qpos0[address])
+        joint.position = joint.initial_distance
+      else:
+        joint.initial_angle = float(model.qpos0[address])
+        joint.position = joint.initial_angle
       if limited:
         lower, upper = (float(v) for v in model.jnt_range[joint_id])
         key = "angle" if kind is BallJoint else "position"

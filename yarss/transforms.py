@@ -1,4 +1,4 @@
-"""Small helpers for reading static poses, not for simulating joint motion.
+"""NumPy helpers for pose matrices and quaternions.
 
 Matrices use column vectors: world_point = transform @ local_point.
 Positions are in meters; quaternions are ordered (w, x, y, z).
@@ -8,7 +8,25 @@ import numpy as np
 from numpy.typing import NDArray
 
 Vector3 = NDArray[np.float64]
+Matrix3 = NDArray[np.float64]
 Matrix4 = NDArray[np.float64]
+
+
+def rotation_transform(axis: Vector3, angle: float) -> Matrix4:
+  """Build a 4x4 rotation directly from an axis and an angle in radians."""
+  axis = np.asarray(axis, dtype=float)
+  length = np.linalg.norm(axis)
+  if length == 0:
+    raise ValueError("A rotation axis cannot have zero length")
+  axis = axis / length
+  x, y, z = axis
+  # cross @ vector gives the cross product of the axis with that vector.
+  cross = np.array([[0, -z, y], [z, 0, -x], [-y, x, 0]])
+  cosine, sine = np.cos(angle), np.sin(angle)
+  # Rodrigues' formula: rotate around the axis while leaving the axis itself fixed.
+  matrix = np.eye(4)
+  matrix[:3, :3] = cosine * np.eye(3) + (1 - cosine) * np.outer(axis, axis) + sine * cross
+  return matrix
 
 
 def transform(

@@ -2,7 +2,8 @@
 
 This first version loads robot descriptions into a shared `Robot` containing
 `Part` objects and typed `Joint` connections. It extracts geometry, default
-poses, joint frames, axes, and limits. Joint motion and physics are placeholders.
+poses, joint frames, axes, and limits. The viewer can edit MJCF hinge and slide
+poses directly; physics and constraint solving are future work.
 
 ## Setup and MJCF preview
 
@@ -144,7 +145,11 @@ Drag to orbit and scroll to zoom. Every part is shown at its loaded world pose:
 visual geometry uses translucent gray surfaces, and collision shapes use orange
 wireframes. Use the **Collision meshes** checkbox in the bottom-left corner to
 toggle the collision overlay. Hiding it restores opaque visual surfaces.
-Joints are not drawn. To load another MJCF file:
+Blue arrows mark hinge axes and green arrows mark sliding axes. Each movable
+joint has a labeled slider with its range: arm angles are displayed in degrees,
+and finger travel in meters. Dragging updates the child part and all descendants,
+including their visual meshes, collision shapes, axes, and labels. Fixed joints
+have no degree of freedom and no slider. To load another MJCF file:
 
 ```bash
 python3 example/viewer/view_robot.py /path/to/robot.xml
@@ -172,8 +177,26 @@ the visual surfaces translucent while collision shapes are visible. Use
 the checkbox can still turn it on.
 
 Parts without geometry, such as the FR3's empty root frame, add no meshes.
-Joint definitions are not used to draw anything; each part already has its world
-transform from the loader. Joint visualization and motion are separate work.
+For MJCF, `Part.local_transform` maps from the part to its parent; `Part.transform`
+is the current world pose. A slider calls `Robot.set_joint_position()` to rebuild
+the child's local pose from its joint anchors and coordinate, then propagate
+world poses down the tree. Motion is measured from each joint's `initial_angle`
+or `initial_distance`, so the FR3 opens at its loaded home pose without a jump. Internally,
+angles remain in radians. Several hinge/slide joints on one body compose in
+source order.
+
+These controls edit poses directly. They do not apply forces, prevent collisions,
+or enforce tendons, mimic relations, or equality constraints; the two finger
+sliders operate independently. This first version controls hinges and slides;
+ball and floating joints remain static. Unbounded joints get a finite preview
+slider range, labeled as such, without adding physical limits.
+
+Check the sliders, rendered meshes, and joint frames against native MuJoCo
+kinematics without opening an interactive window:
+
+```bash
+python3 example/viewer/check_joint_controls.py
+```
 
 For each geometry, the viewer computes:
 
@@ -184,7 +207,8 @@ world_vertices = geometry.vertices @ world[:3, :3].T + world[:3, 3]
 
 The second line applies the matrix to an entire `N x 3` array of vertices.
 `Part.transform` already includes all ancestors, so their matrices must not be
-applied again. The viewer leaves the source geometry and transforms unchanged.
+applied again. The viewer preserves the source geometry and joint anchor frames;
+sliders update joint positions and part transforms.
 It draws `Part.visuals` in a neutral color; source materials are not imported.
 For MJCF, that list follows MuJoCo's [default visible groups 0, 1, and 2](https://mujoco.readthedocs.io/en/stable/XMLreference.html#body-geom-group).
 The FR3's separate collision shapes use group 3 and are stored in `Part.collisions`;
@@ -193,7 +217,22 @@ the viewer draws these as orange wireframes, including the finger pad boxes.
 ## Joint classes
 
 Every type directly subclasses `Joint`; each file describes its intended
-constraints in comments. There are no constraint solvers or motion methods yet.
+constraints in comments. Fixed, sliding, and rotating joints each implement
+`motion_transform()` to return their own motion matrix. Rotations are calculated
+directly from the axis and the angle in radians using Rodrigues' formula.
+Other types remain placeholders and raise `NotImplementedError` for pose editing.
+There are no constraint solvers yet.
+
+Initial states are explicit fields on the joint subclasses:
+
+- `RotatingJoint` and `UnlimitedRotatingJoint`: `initial_angle` in radians.
+- `SlidingJoint`: `initial_distance` in meters.
+- `BallJoint`: `initial_orientation`, a 3x3 rotation matrix in joint coordinates.
+- `FloatingJoint`: `initial_pose`, a 4x4 world transform for an MJCF free joint.
+
+The MJCF loader fills these fields from the model's default joint coordinates.
+They remain unchanged during pose editing. The current scalar coordinate is
+still `joint.position`, in radians for rotation and meters for sliding.
 
 | Class | Intended motion | Imported from |
 | --- | --- | --- |
@@ -222,8 +261,10 @@ URDF descriptions are separately checked to be one connected tree.
 - Mesh vertices are NumPy arrays of shape `(N, 3)`. Faces are tuples of vertex
   indices, allowing variable-length polygons. URDF meshes also retain `mesh_path`.
   USD polygons remain polygons; primitives remain shape/dimension records.
-- `Part.transform` maps part coordinates to world coordinates at the file's
-  default pose. `Geometry.transform` maps geometry coordinates to part coordinates.
+- `Part.transform` maps part coordinates to world coordinates, initially at the file's
+  default pose and updated by the MJCF joint controls. `Part.local_transform` stores
+  the MJCF part's pose relative to its parent. `Geometry.transform` maps geometry
+  coordinates to part coordinates.
   Joint anchor matrices map the joint frame into each endpoint's part frame.
 - Transforms are NumPy arrays of shape `(4, 4)` and use column vectors.
   `part.transform @ geometry.transform @ [x, y, z, 1]` gives a homogeneous
@@ -238,9 +279,9 @@ URDF descriptions are separately checked to be one connected tree.
 
 ## Current scope
 
-This is a description loader, not a simulation engine. It does not calculate
-joint motion, forces, motors, contacts, or enforce mimic relationships. Material
-rendering and texture data are not imported into `Geometry`.
+The loader extracts robot descriptions, and the viewer edits scalar joint poses
+using forward kinematics. Forces, motors, contacts, and mimic relationships are
+not simulated. Material rendering and texture data are not imported into `Geometry`.
 
 MJCF is compiled by MuJoCo to resolve defaults, includes, mesh transforms, and
 orientation conventions. Static-body fusion and visual discarding are disabled
@@ -262,11 +303,12 @@ The complete MJCF is included directly. The native MuJoCo gripper actuator is
 `fr3_actuator8`: control 0 closes it, and 255 opens it fully.
 
 The FR3 MJCF starts in its collision-free home pose, with the gripper open.
-Its body reference transforms and joint `ref` values encode that pose while
+Its body transforms and joint `ref` values encode that pose while
 preserving the original joint coordinates and limits. Finger joints explicitly
 declare `type="slide"`, with positions measured in meters. For MJCF, motion
-relative to the loaded geometry is `q - joint.metadata['reference_position'][0]`
-for a scalar joint. The loader reads this default pose without stepping physics.
+relative to the loaded geometry is `joint.position - joint.initial_angle` for
+rotating joints and `joint.position - joint.initial_distance` for sliding joints.
+The loader reads this default pose without stepping physics.
 
 The URDF retains the manufacturer's zero-coordinate pose; it has no standard
 initial joint-state field. Its all-zero pose is not the arm's home configuration.

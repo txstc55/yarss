@@ -1,4 +1,4 @@
-"""Preview MJCF visual and collision geometry after running `./yarss/install.sh`."""
+"""Preview MJCF geometry and edit joint poses after running `./yarss/install.sh`."""
 
 import argparse
 from pathlib import Path

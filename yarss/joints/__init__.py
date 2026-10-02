@@ -9,23 +9,23 @@ from .planar import PlanarJoint
 from .rotating import RotatingJoint
 from .screw import ScrewJoint
 from .sliding import SlidingJoint
-from .unlimited_rotating import UnlimitedRotatingJoint
 from .universal import UniversalJoint
+from .unlimited_rotating import UnlimitedRotatingJoint
 
 __all__ = [
+  "BallJoint",
+  "CylindricalJoint",
+  "D6Joint",
+  "DistanceJoint",
+  "FixedJoint",
+  "FloatingJoint",
   "Joint",
   "JointLimit",
   "Mimic",
-  "FixedJoint",
-  "RotatingJoint",
-  "UnlimitedRotatingJoint",
-  "SlidingJoint",
   "PlanarJoint",
-  "FloatingJoint",
-  "BallJoint",
-  "CylindricalJoint",
-  "UniversalJoint",
+  "RotatingJoint",
   "ScrewJoint",
-  "DistanceJoint",
-  "D6Joint",
+  "SlidingJoint",
+  "UniversalJoint",
+  "UnlimitedRotatingJoint",
 ]

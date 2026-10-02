@@ -3,8 +3,11 @@
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import numpy as np
+
 from ..joints import Joint
 from ..parts import Part
+from ..transforms import Matrix4
 
 
 @dataclass
@@ -42,6 +45,58 @@ class Robot:
     if part_name not in self.parts:
       raise KeyError(part_name)
     return [j for j in self.joints.values() if part_name in (j.parent, j.child)]
+
+  def set_joint_position(self, name: str, position: float) -> None:
+    """Edit an MJCF hinge/slide coordinate and propagate its child body's pose.
+
+    This is forward kinematics only: no forces, contacts, or coupled joints.
+    Internal angles stay in radians; the viewer converts its degree sliders.
+    """
+    if self.metadata.get("format") != "mjcf":
+      raise ValueError("Interactive joint poses currently support MJCF robots only")
+    joint = self.joints[name]
+    if joint.kind not in {"rotating", "unlimited_rotating", "sliding"}:
+      raise ValueError(f"Joint {name!r} does not have a supported scalar coordinate")
+    if not np.isfinite(position):
+      raise ValueError("Joint position must be finite")
+
+    attached = [j for j in self.joints.values() if j.child == joint.child]
+    if any(j.kind not in {"fixed", "rotating", "unlimited_rotating", "sliding"} for j in attached):
+      raise ValueError("Pose editing requires fixed, hinge, or slide joints on this body")
+    joint.position = float(position)
+    # Start from the loaded body pose, then apply each joint in source order.
+    # Rebuild from absolute coordinates so slider movements never accumulate drift.
+    local = attached[0].parent_frame @ np.linalg.inv(attached[0].child_frame)
+    for connection in attached:
+      anchor = connection.child_frame
+      local = local @ anchor @ connection.motion_transform() @ np.linalg.inv(anchor)
+    self.parts[joint.child].local_transform = local
+
+    # MJCF bodies form a tree, even when a body contains several joints.
+    parents = {j.child: j.parent for j in self.joints.values()}
+    children: dict[str | None, set[str]] = {}
+    for connection in self.joints.values():
+      children.setdefault(connection.parent, set()).add(connection.child)
+    pending = [joint.child]
+    while pending:
+      child = self.parts[pending.pop()]
+      parent = parents[child.name]
+      parent_world = self.parts[parent].transform if parent is not None else np.eye(4)
+      child.transform = parent_world @ child.local_transform
+      pending.extend(children.get(child.name, ()))
+
+  def joint_world_frame(self, name: str) -> Matrix4:
+    """Locate an MJCF joint's anchor, including earlier joints on the same body."""
+    joint = self.joints[name]
+    local = joint.parent_frame @ np.linalg.inv(joint.child_frame)
+    for connection in self.joints.values():
+      if connection is joint:
+        break
+      if connection.child == joint.child:
+        anchor = connection.child_frame
+        local = local @ anchor @ connection.motion_transform() @ np.linalg.inv(anchor)
+    parent_world = self.parts[joint.parent].transform if joint.parent is not None else np.eye(4)
+    return parent_world @ local @ joint.child_frame
 
   def validate(self) -> None:
     """Reject broken topology and unresolved external geometry files."""

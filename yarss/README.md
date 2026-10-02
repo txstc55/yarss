@@ -27,8 +27,13 @@ viewer.show()
 
 The viewer displays every part's visual geometry at the loaded pose, including
 the arm and gripper, with orange wireframes for collision shapes. Visual surfaces
-are translucent so the collision geometry is visible inside them. It does not
-draw joints. Toggle the overlay with the **Collision meshes** checkbox; hiding
+are translucent so the collision geometry is visible inside them.
+Toggle the overlay with the **Collision meshes** checkbox; hiding
 it restores opaque visual surfaces. To start with collisions hidden, call
 `viewer.show(show_collisions=False)`. PyVista supplies the default window size.
-Joint classes currently store definitions; physics and joint motion are future work.
+MJCF hinges have blue axis arrows and sliders in degrees; sliding joints have
+green arrows and sliders in meters. Each slider shows the joint name and range.
+Dragging edits the child's local transform and propagates world poses through
+its descendants. Fixed joints have no slider. Ball and floating joints are not
+controlled in this first version. Physics and coupled-joint constraints are
+future work; the FR3 finger sliders operate independently.
