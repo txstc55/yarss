@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 from numpy.typing import NDArray
 
-from ..transforms import Matrix4
+from ..transforms import Matrix3, Matrix4, Vector3
 
 if TYPE_CHECKING:
   from ..joints import Joint
@@ -43,6 +43,12 @@ class Part:
   The MJCF loader also stores ``local_transform`` relative to the parent body.
   The viewer can edit these poses directly; it does not simulate forces.
   A geometry may appear in both lists when it serves both purposes.
+
+  ``mass`` is this part's mass in kg, excluding descendants.
+  ``center_of_mass`` is a position in part coordinates, in meters.
+  ``inertia`` is the 3x3 rotational inertia about that center of mass, expressed
+  in the part's local axes, in kg*m^2. It is not about the part's frame origin.
+  These local mass properties stay constant when the part moves.
   """
 
   name: str
@@ -56,6 +62,9 @@ class Part:
   incoming_joints: list[Joint] = field(default_factory=list, repr=False)
   # Filled by Robot.finish_setup(): this part first, then its descendants.
   affected_parts: list[Part] = field(default_factory=list, init=False, repr=False)
+  mass: float = 0.0
+  center_of_mass: Vector3 = field(default_factory=lambda: np.zeros(3))
+  inertia: Matrix3 = field(default_factory=lambda: np.zeros((3, 3)))
 
   def add_connected_child(self, child: Part) -> None:
     """Record a child once, even when several joints connect the same parts."""

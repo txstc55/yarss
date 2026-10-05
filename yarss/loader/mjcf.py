@@ -53,12 +53,18 @@ def load_mjcf(path: Path) -> Robot:
   for body_id in range(1, model.nbody):
     name = model.body(body_id).name or _generated_name("body", body_id, body_names)
     names[body_id] = name
+    # MuJoCo stores principal moments in an inertial frame centered at the COM.
+    # Express the tensor in part axes, still about the COM (no origin shift).
+    inertia_rotation = transform(quaternion=model.body_iquat[body_id])[:3, :3]
+    inertia = inertia_rotation @ np.diag(model.body_inertia[body_id]) @ inertia_rotation.T
     robot.add_part(
       Part(
         name,
         transform=transform(data.xpos[body_id], data.xquat[body_id]),
         local_transform=transform(model.body_pos[body_id], model.body_quat[body_id]),
-        metadata={"mass": float(model.body_mass[body_id])},
+        mass=float(model.body_mass[body_id]),
+        center_of_mass=model.body_ipos[body_id].copy(),
+        inertia=inertia,
       )
     )
 
