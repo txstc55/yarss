@@ -142,10 +142,10 @@ the checkbox can still turn it on.
 
 Parts without geometry, such as the FR3's empty root frame, add no meshes.
 For MJCF, `Part.local_transform` maps from the part to its parent; `Part.transform`
-is the current world pose. A slider calls `Robot.set_joint_position()` to rebuild
+is the current world pose. A slider calls `Robot.set_joint_value()` to rebuild
 the child's local pose from its joint anchors and coordinate, then propagate
-world poses down the tree. Motion is measured from each joint's `initial_angle`
-or `initial_distance`, so the FR3 opens at its loaded home pose without a jump.
+world poses down the tree. Motion is measured from each joint's `initial_value`,
+so the FR3 opens at its loaded home pose without a jump.
 Joint angles and angular limits are stored in degrees, matching the sliders.
 Several hinge/slide joints on one body compose in source order.
 
@@ -172,7 +172,7 @@ world_vertices = geometry.vertices @ world[:3, :3].T + world[:3, 3]
 The second line applies the matrix to an entire `N x 3` array of vertices.
 `Part.transform` already includes all ancestors, so their matrices must not be
 applied again. The viewer preserves the source geometry and joint anchor frames;
-sliders update joint positions and part transforms.
+sliders update joint values and part transforms.
 It draws `Part.visuals` in a neutral color; source materials are not imported.
 For MJCF, that list follows MuJoCo's [default visible groups 0, 1, and 2](https://mujoco.readthedocs.io/en/stable/XMLreference.html#body-geom-group).
 The FR3's separate collision shapes use group 3 and are stored in `Part.collisions`;
@@ -189,16 +189,26 @@ angle to radians for NumPy's sine and cosine functions.
 Other types remain placeholders and raise `NotImplementedError` for pose editing.
 There are no constraint solvers yet.
 
-Initial states are explicit fields on the joint subclasses:
+Every joint uses the same state field names: `value` for its current state and
+`initial_value` for the state loaded from the file. Their representation depends
+on the joint type:
 
-- `RotatingJoint` and `UnlimitedRotatingJoint`: `initial_angle` in degrees.
-- `SlidingJoint`: `initial_distance` in meters.
-- `BallJoint`: `initial_orientation`, a 3x3 rotation matrix in joint coordinates.
-- `FloatingJoint`: `initial_pose`, a 4x4 world transform for an MJCF free joint.
+- `RotatingJoint` and `UnlimitedRotatingJoint`: a scalar in degrees.
+- `SlidingJoint`: a scalar in meters.
+- `BallJoint`: a 3x3 rotation matrix in joint coordinates.
+- `FloatingJoint`: a 4x4 world transform with translations in meters.
+- `FixedJoint`: zero; its motion transform is always identity.
 
-The MJCF loader fills these fields from the model's default joint coordinates.
-They remain unchanged during pose editing. The current scalar coordinate is
-still `joint.position`, in degrees for rotation and meters for sliding.
+The MJCF loader initializes both fields. `initial_value` stays unchanged during
+pose editing; matrix values are separate copies. Scalar motion uses
+`joint.value - joint.initial_value`. Ball and floating pose editing remains
+unimplemented.
+
+```python
+joint = robot.joints["fr3_joint4"]
+print(joint.initial_value, joint.value)
+robot.set_joint_value(joint.name, -120.0)  # Degrees for this rotating joint.
+```
 
 | Class | Intended motion | MJCF source |
 | --- | --- | --- |
@@ -238,7 +248,7 @@ their source order when computing that body's motion.
   `rotation_transform()` and `rpy_quaternion()` accept degrees.
   Imported angular stiffness uses N*m/degree and linear stiffness uses N/m,
   preserving the physical torque or force for the same displacement.
-- Scalar joint limits use `joint.limits['position']`. Ball limits use `'angle'`.
+- Scalar joint limits use `joint.limits['value']`. Ball limits use `'angle'`.
   Rotation matrices, quaternions, axes, and scale factors are dimensionless.
 
 Run the MJCF unit and loader checks with:
@@ -272,8 +282,8 @@ The FR3 MJCF starts in its collision-free home pose, with the gripper open.
 Its body transforms and joint `ref` values encode that pose while
 preserving the original joint coordinates and limits. Finger joints explicitly
 declare `type="slide"`, with positions measured in meters. For MJCF, motion
-relative to the loaded geometry is `joint.position - joint.initial_angle` for
-rotating joints and `joint.position - joint.initial_distance` for sliding joints.
+relative to the loaded geometry is `joint.value - joint.initial_value` for
+both rotating and sliding joints.
 The loader reads this default pose without stepping physics.
 
 ## Code formatting

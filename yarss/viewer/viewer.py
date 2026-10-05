@@ -138,18 +138,18 @@ class Viewer:
       unit = "m" if linear else "deg"
       # An unbounded joint still needs a finite slider; this is only a preview range.
       span = 0.1 if linear else 180.0
-      limit = joint.limits.get("position")
-      lower = limit.lower if limit and limit.lower is not None else joint.position - span
-      upper = limit.upper if limit and limit.upper is not None else joint.position + span
+      limit = joint.limits.get("value")
+      lower = limit.lower if limit and limit.lower is not None else joint.value - span
+      upper = limit.upper if limit and limit.upper is not None else joint.value + span
       decimals = 3 if linear else 1
       title = f"{joint.name} ({unit})"
       if limit is None:
         title += " (preview)"
       y = 0.9 - index * spacing
       widget = self.plotter.add_slider_widget(
-        partial(self._set_joint_position, robot, joint),
+        partial(self._set_joint_value, robot, joint),
         (lower, upper),
-        value=joint.position,
+        value=joint.value,
         title="",
         pointa=(0.79, y),
         pointb=(0.92, y),
@@ -184,12 +184,12 @@ class Viewer:
         label.prop.justification_horizontal = alignment
         label.prop.justification_vertical = "center"
 
-  def _set_joint_position(self, robot: Robot, joint: Joint, value: float) -> None:
+  def _set_joint_value(self, robot: Robot, joint: Joint, value: float) -> None:
     """Slider -> child local pose -> descendant world poses -> displayed meshes."""
     # PyVista also calls the callback when it first creates each slider.
-    if np.isclose(value, joint.position, atol=1e-12, rtol=0):
+    if np.isclose(value, joint.value, atol=1e-12, rtol=0):
       return
-    robot.set_joint_position(joint.name, value)
+    robot.set_joint_value(joint.name, value)
     for part, mesh, part_points in self._part_meshes:
       mesh.points = part_points @ part.transform[:3, :3].T + part.transform[:3, 3]
       mesh.compute_normals(inplace=True)

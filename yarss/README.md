@@ -34,8 +34,9 @@ it restores opaque visual surfaces. To start with collisions hidden, call
 `viewer.show(show_collisions=False)`. PyVista supplies the default window size.
 MJCF hinges have blue axis arrows and sliders in degrees; sliding joints have
 green arrows and sliders in meters. Each slider shows the joint name and range.
-Joint angles, initial angles, and angular limits are stored in degrees, so the
-slider values can be passed directly to `Robot.set_joint_position()`.
+Each joint stores `value` and `initial_value`. Rotating joints use degrees;
+sliding joints use meters. Slider values pass directly to `Robot.set_joint_value()`.
+Motion is calculated from `value - initial_value`, while `initial_value` stays fixed.
 Dragging edits the child's local transform and propagates world poses through
 its descendants. Fixed joints have no slider. Ball and floating joints are not
 controlled in this first version. Physics and coupled-joint constraints are

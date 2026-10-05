@@ -125,26 +125,30 @@ def load_mjcf(path: Path) -> Robot:
       )
       address = int(model.jnt_qposadr[joint_id])
       if kind is FloatingJoint:
-        joint.initial_pose = transform(
+        joint.initial_value = transform(
           model.qpos0[address : address + 3], model.qpos0[address + 3 : address + 7]
         )
       elif kind is BallJoint:
-        joint.initial_orientation = transform(quaternion=model.qpos0[address : address + 4])[
+        joint.initial_value = transform(quaternion=model.qpos0[address : address + 4])[
           :3, :3
         ].copy()
       elif kind is SlidingJoint:
-        joint.initial_distance = float(model.qpos0[address])
-        joint.position = joint.initial_distance
+        joint.initial_value = float(model.qpos0[address])
       else:
         # MuJoCo compiles angular coordinates to radians, regardless of XML units.
-        joint.initial_angle = float(np.rad2deg(model.qpos0[address]))
-        joint.position = joint.initial_angle
+        joint.initial_value = float(np.rad2deg(model.qpos0[address]))
+      # Matrices need separate storage so editing the current value preserves the loaded value.
+      joint.value = (
+        joint.initial_value.copy()
+        if isinstance(joint.initial_value, np.ndarray)
+        else joint.initial_value
+      )
       if limited:
         bounds = model.jnt_range[joint_id]
         if kind is not SlidingJoint:
           bounds = np.rad2deg(bounds)
         lower, upper = (float(v) for v in bounds)
-        key = "angle" if kind is BallJoint else "position"
+        key = "angle" if kind is BallJoint else "value"
         joint.limits[key] = JointLimit(lower, upper)
       robot.add_joint(joint)
   # Actuators, tendons, and equality constraints are outside this geometry/

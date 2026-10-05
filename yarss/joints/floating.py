@@ -10,8 +10,9 @@ from .joint import Joint
 class FloatingJoint(Joint):
   """Allow three translations and three rotations (6 DoF; MJCF 'free')."""
 
-  # Initial world pose of an MJCF free joint, including position and orientation.
-  initial_pose: Matrix4 = field(default_factory=lambda: np.eye(4))
+  # Current and loaded world poses, each a 4x4 transform with meter translations.
+  value: Matrix4 = field(default_factory=lambda: np.eye(4))
+  initial_value: Matrix4 = field(default_factory=lambda: np.eye(4))
 
   # Future: represent an unconstrained pose with position and orientation.
   kind = "floating"

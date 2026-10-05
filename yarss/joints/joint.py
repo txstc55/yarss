@@ -41,9 +41,12 @@ class Joint:
 
   Each anchor matrix maps the joint frame into that endpoint's part frame.
   Axis is expressed in the joint frame, not in world coordinates.
-  Scalar limits use the key 'position'; D6 limits use transX/Y/Z, rotX/Y/Z.
+  Scalar limits use the key 'value'; ball cone limits use 'angle'.
+  D6 limits use transX/Y/Z, rotX/Y/Z.
   Multiple MJCF joints on one body share endpoints and retain source order.
-  ``position`` is the current scalar coordinate, in degrees or meters.
+  ``value`` is the current joint state; ``initial_value`` is the loaded state.
+  Rotating and sliding joints use scalars in degrees and meters, respectively.
+  Ball and floating joints use rotation and pose matrices.
 
   Future solvers should use these definitions to construct constraints,
   apply limits/drives, and update part poses. Loading does none of that.
@@ -65,7 +68,8 @@ class Joint:
   mimic: Mimic | None = None
   enabled: bool = True
   metadata: dict[str, object] = field(default_factory=dict)
-  position: float = 0.0  # this is actually the joint's current value, like the angle, or the displacement along the axis
+  value: float | np.ndarray = 0.0
+  initial_value: float | np.ndarray = 0.0
 
   kind: ClassVar[str] = "joint"
   dof: ClassVar[int | None] = None

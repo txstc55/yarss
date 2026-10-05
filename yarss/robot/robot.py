@@ -46,7 +46,7 @@ class Robot:
       raise KeyError(part_name)
     return [j for j in self.joints.values() if part_name in (j.parent, j.child)]
 
-  def set_joint_position(self, name: str, position: float) -> None:
+  def set_joint_value(self, name: str, value: float) -> None:
     """Edit an MJCF hinge/slide coordinate and propagate its child body's pose.
 
     This is forward kinematics only: no forces, contacts, or coupled joints.
@@ -57,13 +57,13 @@ class Robot:
     joint = self.joints[name]
     if joint.kind not in {"rotating", "unlimited_rotating", "sliding"}:
       raise ValueError(f"Joint {name!r} does not have a supported scalar coordinate")
-    if not np.isfinite(position):
-      raise ValueError("Joint position must be finite")
+    if not np.isfinite(value):
+      raise ValueError("Joint value must be finite")
 
     attached = [j for j in self.joints.values() if j.child == joint.child]
     if any(j.kind not in {"fixed", "rotating", "unlimited_rotating", "sliding"} for j in attached):
       raise ValueError("Pose editing requires fixed, hinge, or slide joints on this body")
-    joint.position = float(position)
+    joint.value = float(value)
     # Start from the loaded body pose, then apply each joint in source order.
     # Rebuild from absolute coordinates so slider movements never accumulate drift.
     local = attached[0].parent_frame @ np.linalg.inv(attached[0].child_frame)

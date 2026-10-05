@@ -18,11 +18,11 @@ def check_joint_motions():
   axis = np.array([0.0, 1.0, 1.0])
   diagonal = 1 / np.sqrt(2)
   for kind in (RotatingJoint, UnlimitedRotatingJoint):
-    joint = kind("turn", "parent", "child", axis=axis, initial_angle=30.0)
-    joint.position = 30.0
+    joint = kind("turn", "parent", "child", axis=axis, initial_value=30.0)
+    joint.value = 30.0
     np.testing.assert_allclose(joint.motion_transform(), np.eye(4), atol=1e-12)
     for angle in (90.0, 810.0):
-      joint.position = 30.0 + angle
+      joint.value = 30.0 + angle
       motion = joint.motion_transform()
       np.testing.assert_allclose(motion[:3, 0], [0, diagonal, -diagonal], atol=1e-12)
       np.testing.assert_allclose(motion[:3, :3] @ axis, axis, atol=1e-12)
@@ -34,8 +34,8 @@ def check_joint_motions():
     "parent",
     "child",
     axis=axis,
-    position=0.14,
-    initial_distance=0.04,
+    value=0.14,
+    initial_value=0.04,
   )
   expected = np.eye(4)
   expected[:3, 3] = [0, 0.1 * diagonal, 0.1 * diagonal]
@@ -79,26 +79,28 @@ def check_initial_states():
       path.write_text(xml.replace('angle="radian"', f'angle="{unit}"'))
       robot = load_robot(path)
       scale = 180 / np.pi if unit == "radian" else 1.0
-      np.testing.assert_allclose(robot.joints["angle"].initial_angle, 0.3 * scale)
-      np.testing.assert_allclose(robot.joints["spin"].initial_angle, 0.7 * scale)
-      limit = robot.joints["angle"].limits["position"]
+      np.testing.assert_allclose(robot.joints["angle"].initial_value, 0.3 * scale)
+      np.testing.assert_allclose(robot.joints["spin"].initial_value, 0.7 * scale)
+      limit = robot.joints["angle"].limits["value"]
       np.testing.assert_allclose([limit.lower, limit.upper], [-scale, scale])
       np.testing.assert_allclose(robot.joints["orientation"].limits["angle"].upper, 0.8 * scale)
-      assert robot.joints["distance"].initial_distance == 0.04
-      limit = robot.joints["distance"].limits["position"]
+      assert robot.joints["distance"].initial_value == 0.04
+      limit = robot.joints["distance"].limits["value"]
       np.testing.assert_allclose([limit.lower, limit.upper], [0.0, 0.08])
-      np.testing.assert_array_equal(robot.joints["orientation"].initial_orientation, np.eye(3))
+      np.testing.assert_array_equal(robot.joints["orientation"].initial_value, np.eye(3))
       np.testing.assert_allclose(
-        robot.joints["pose"].initial_pose, robot.parts["free_body"].transform, atol=1e-12
+        robot.joints["pose"].initial_value, robot.parts["free_body"].transform, atol=1e-12
       )
+      for joint in robot.joints.values():
+        np.testing.assert_array_equal(joint.value, joint.initial_value)
+        if isinstance(joint.value, np.ndarray):
+          assert not np.shares_memory(joint.value, joint.initial_value)
       for name, value in (("angle", 0.6), ("spin", 2.0), ("distance", 0.02)):
         joint = robot.joints[name]
-        initial = joint.initial_distance if joint.kind == "sliding" else joint.initial_angle
-        assert joint.position == initial
-        robot.set_joint_position(name, value)
-        assert (
-          joint.initial_distance if joint.kind == "sliding" else joint.initial_angle
-        ) == initial
+        initial = joint.initial_value
+        assert joint.value == initial
+        robot.set_joint_value(name, value)
+        assert joint.initial_value == initial
       for joint in robot.joints.values():
         assert set(joint.metadata) == {"order_in_body", "stiffness"}
 
@@ -183,14 +185,12 @@ def check_shared_body():
           [representation.GetMinimumValue(), representation.GetMaximumValue()],
           [initial - span, initial + span],
         )
-      for name, position in (("hinge", 45.0), ("slide", 0.07), ("hinge", -25.0)):
-        widgets[name].GetRepresentation().SetValue(position)
+      for name, value in (("hinge", 45.0), ("slide", 0.07), ("hinge", -25.0)):
+        widgets[name].GetRepresentation().SetValue(value)
         widgets[name].InvokeEvent("InteractionEvent")
         joint_id = model.joint(name).id
         data.qpos[model.jnt_qposadr[joint_id]] = (
-          position
-          if model.jnt_type[joint_id] == mujoco.mjtJoint.mjJNT_SLIDE
-          else np.deg2rad(position)
+          value if model.jnt_type[joint_id] == mujoco.mjtJoint.mjJNT_SLIDE else np.deg2rad(value)
         )
         check_poses(robot, model, data)
     finally:
@@ -225,7 +225,7 @@ def main():
       scale = 1.0 if linear else 180 / np.pi
       initial = model.qpos0[model.jnt_qposadr[joint_id]] * scale
       lower, upper = model.jnt_range[joint_id] * scale
-      np.testing.assert_allclose(joint.position, initial, atol=1e-12)
+      np.testing.assert_allclose(joint.value, initial, atol=1e-12)
       representation = widget.GetRepresentation()
       np.testing.assert_allclose(
         [
@@ -260,11 +260,9 @@ def main():
       widget.GetRepresentation().SetValue(value)
       widget.InvokeEvent("InteractionEvent")
       joint_id = model.joint(name).id
-      position = (
-        value if model.jnt_type[joint_id] == mujoco.mjtJoint.mjJNT_SLIDE else np.deg2rad(value)
-      )
-      data.qpos[model.jnt_qposadr[joint_id]] = position
-      np.testing.assert_allclose(robot.joints[name].position, value, atol=1e-12)
+      qpos = value if model.jnt_type[joint_id] == mujoco.mjtJoint.mjJNT_SLIDE else np.deg2rad(value)
+      data.qpos[model.jnt_qposadr[joint_id]] = qpos
+      np.testing.assert_allclose(robot.joints[name].value, value, atol=1e-12)
       check_poses(robot, model, data)
       check_meshes(viewer, model, data)
       np.testing.assert_array_equal(np.asarray(viewer.plotter.camera_position), camera)
