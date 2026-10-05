@@ -106,6 +106,10 @@ def load_mjcf(path: Path) -> Robot:
       limited = bool(model.jnt_limited[joint_id])
       if kind is RotatingJoint and not limited:
         kind = UnlimitedRotatingJoint
+      stiffness = float(model.jnt_stiffness[joint_id])
+      if kind in {RotatingJoint, UnlimitedRotatingJoint, BallJoint}:
+        # Torque per degree, so stiffness * a degree displacement is still N*m.
+        stiffness *= np.pi / 180
       anchor = transform(model.jnt_pos[joint_id])
       joint = kind(
         model.joint(joint_id).name or _generated_name("joint", joint_id, joint_names),
@@ -116,7 +120,7 @@ def load_mjcf(path: Path) -> Robot:
         axis=model.jnt_axis[joint_id].copy(),
         metadata={
           "order_in_body": joint_id - start,
-          "stiffness": float(model.jnt_stiffness[joint_id]),
+          "stiffness": stiffness,
         },
       )
       address = int(model.jnt_qposadr[joint_id])
@@ -132,10 +136,14 @@ def load_mjcf(path: Path) -> Robot:
         joint.initial_distance = float(model.qpos0[address])
         joint.position = joint.initial_distance
       else:
-        joint.initial_angle = float(model.qpos0[address])
+        # MuJoCo compiles angular coordinates to radians, regardless of XML units.
+        joint.initial_angle = float(np.rad2deg(model.qpos0[address]))
         joint.position = joint.initial_angle
       if limited:
-        lower, upper = (float(v) for v in model.jnt_range[joint_id])
+        bounds = model.jnt_range[joint_id]
+        if kind is not SlidingJoint:
+          bounds = np.rad2deg(bounds)
+        lower, upper = (float(v) for v in bounds)
         key = "angle" if kind is BallJoint else "position"
         joint.limits[key] = JointLimit(lower, upper)
       robot.add_joint(joint)

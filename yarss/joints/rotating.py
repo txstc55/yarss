@@ -8,13 +8,13 @@ from .joint import Joint
 class RotatingJoint(Joint):
   """Allow rotation about one axis within angular limits (1 DoF)."""
 
-  initial_angle: float = 0.0  # Angle at the loaded pose, in radians.
+  initial_angle: float = 0.0  # Angle at the loaded pose, in degrees.
 
   # Future: constrain translation and off-axis rotation; enforce angle limits.
   kind = "rotating"
   dof = 1
 
   def motion_transform(self) -> Matrix4:
-    """Rotate about the axis by the change from the initial angle, in radians."""
+    """Rotate about the axis by the change from the initial angle, in degrees."""
     angle = self.position - self.initial_angle
     return rotation_transform(self.axis, angle)

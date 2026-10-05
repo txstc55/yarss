@@ -135,14 +135,12 @@ class Viewer:
     spacing = min(0.1, 0.8 / max(len(controls) - 1, 1))
     for index, (robot, joint) in enumerate(controls):
       linear = joint.kind == "sliding"
-      factor = 1.0 if linear else 180 / np.pi
       unit = "m" if linear else "deg"
       # An unbounded joint still needs a finite slider; this is only a preview range.
-      span = 0.1 if linear else np.pi
+      span = 0.1 if linear else 180.0
       limit = joint.limits.get("position")
       lower = limit.lower if limit and limit.lower is not None else joint.position - span
       upper = limit.upper if limit and limit.upper is not None else joint.position + span
-      lower, upper = lower * factor, upper * factor
       decimals = 3 if linear else 1
       title = f"{joint.name} ({unit})"
       if limit is None:
@@ -151,7 +149,7 @@ class Viewer:
       widget = self.plotter.add_slider_widget(
         partial(self._set_joint_position, robot, joint),
         (lower, upper),
-        value=joint.position * factor,
+        value=joint.position,
         title="",
         pointa=(0.79, y),
         pointb=(0.92, y),
@@ -188,11 +186,10 @@ class Viewer:
 
   def _set_joint_position(self, robot: Robot, joint: Joint, value: float) -> None:
     """Slider -> child local pose -> descendant world poses -> displayed meshes."""
-    position = value if joint.kind == "sliding" else float(np.deg2rad(value))
     # PyVista also calls the callback when it first creates each slider.
-    if np.isclose(position, joint.position, atol=1e-12, rtol=0):
+    if np.isclose(value, joint.position, atol=1e-12, rtol=0):
       return
-    robot.set_joint_position(joint.name, position)
+    robot.set_joint_position(joint.name, value)
     for part, mesh, part_points in self._part_meshes:
       mesh.points = part_points @ part.transform[:3, :3].T + part.transform[:3, 3]
       mesh.compute_normals(inplace=True)

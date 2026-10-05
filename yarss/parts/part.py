@@ -14,8 +14,9 @@ class Geometry:
   """A mesh reference, inline mesh, or an un-tessellated primitive.
 
   ``transform`` maps geometry coordinates into the owning part's frame.
-  Meshes contain vertices and polygon faces; external URDF meshes also keep
-  their resolved file path. Primitive parameters use full lengths, not half lengths.
+  Meshes contain vertices and polygon faces. Primitive parameters use full
+  lengths, not half lengths. MJCF mesh scale is baked into the compiled vertices.
+  Vertex coordinates, translations, and primitive lengths are in meters.
   """
 
   kind: str
@@ -34,7 +35,6 @@ class Part:
   ``transform`` is the part's current world transform, initially the file's default pose.
   The MJCF loader also stores ``local_transform`` relative to the parent body.
   The viewer can edit these poses directly; it does not simulate forces.
-  USD scale is retained in the world matrix.
   A geometry may appear in both lists when it serves both purposes.
   """
 

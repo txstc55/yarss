@@ -1,6 +1,6 @@
 # YARSS — Yet Another Robotics Simulation System
 
-This first version loads robot descriptions into a shared `Robot` containing
+This first version loads MJCF robot descriptions into a `Robot` containing
 `Part` objects and typed `Joint` connections. It extracts geometry, default
 poses, joint frames, axes, and limits. The viewer can edit MJCF hinge and slide
 poses directly; physics and constraint solving are future work.
@@ -24,33 +24,18 @@ from that folder. Editable mode makes code edits take effect without reinstallin
 You import the installed package with `import yarss`. The second command opens
 the complete FR3 arm and gripper.
 
-URDF uses Python's XML reader, trimesh for mesh files,
-and pycollada for COLLADA geometry. NumPy handles matrices and mesh vertices.
-The optional `usd` dependency group adds OpenUSD for USD loading.
-The example assets are included and load offline after installation.
+NumPy handles matrices and mesh vertices. MuJoCo resolves model files and their
+assets. The bundled example loads offline after installation.
 
-| Bundled example | Parts | Joints |
-| --- | ---: | ---: |
-| Franka Research 3 with parallel gripper, manufacturer URDF | 26 | 25 |
-| Franka Research 3 with parallel gripper, Menagerie-based MJCF | 12 | 12 |
-| Newton cart-pole, USD | 4 | 4 |
+The example is a complete **Franka Research 3 (FR3)** arm with the **Franka Hand
+parallel gripper**: 12 parts and 12 joints, including seven rotating arm joints,
+two sliding finger joints, and three fixed connections. Each finger slides from
+0 to 0.04 m, giving a maximum opening of 0.08 m. Visual and collision meshes are
+included for the arm, hand, and fingers.
 
-Both FR3 examples contain seven rotating arm joints and the Franka Hand's two
-sliding finger joints. Each finger slides from 0 to 40 mm; the fingers move
-symmetrically for an opening of up to 80 mm. Visual meshes and collision geometry
-are included for the arm, hand, and fingers.
-
-Each format provides a complete FR3 with its gripper in one robot package.
-The URDF uses a mimic joint to couple the fingers. The MJCF's `fr3.xml` contains
-the arm, hand, fingers, equality constraint, tendon, and gripper actuator directly;
-all their meshes live together in `franka_fr3/assets/`. These coupling definitions
-remain in the robot files;
-YARSS's joint classes do not simulate them yet.
-
-The URDF also contains a base frame, twelve accelerometer frames, a flange frame,
-and a tool-center frame. The MJCF has three implicit fixed connections, including
-its attachment to the world and the hand's attachment to the arm.
-The sources specify different joint limits, which are preserved as supplied.
+`fr3.xml` contains the full robot, equality constraint, tendon, and gripper
+actuator. All meshes live together in `franka_fr3/assets/`. Coupling definitions
+remain in the file; YARSS does not simulate them yet.
 Asset sources and licenses are recorded in [example/data/README.md](example/data/README.md).
 
 ## Package layout
@@ -64,9 +49,7 @@ yarss/                     # Repository
 │   ├── __init__.py
 │   ├── loader/
 │   │   ├── loader.py       # Loader and load_robot entry points
-│   │   ├── urdf.py
-│   │   ├── mjcf.py
-│   │   └── usd.py
+│   │   └── mjcf.py         # MuJoCo compiler and geometry extraction
 │   ├── joints/
 │   │   ├── joint.py        # Base Joint, limits, and mimic definitions
 │   │   └── ...            # One file per joint subclass
@@ -75,9 +58,11 @@ yarss/                     # Repository
 │   ├── viewer/viewer.py   # General PyVista viewer; add_robot adds every part's visuals
 │   └── transforms.py      # Static pose conversion helpers
 └── example/
+    ├── check_units.py     # MJCF units and loader checks
     ├── data/              # Freely licensed robot and gripper assets
     └── viewer/
-        └── view_robot.py  # Load an MJCF robot and preview all its parts
+        ├── view_robot.py  # Load an MJCF robot and preview all its parts
+        └── check_joint_controls.py
 ```
 
 ## Loading a robot
@@ -85,7 +70,7 @@ yarss/                     # Repository
 ```python
 from yarss import load_robot
 
-robot = load_robot("example/data/urdf/franka_description/urdf/fr3.urdf")
+robot = load_robot("example/data/mjcf/franka_fr3/fr3.xml")
 
 print(robot.name)
 print([part.name for part in robot.roots])
@@ -95,43 +80,22 @@ for joint in robot.joints.values():
 
 wrist = robot.parts["fr3_link7"]
 mesh = wrist.visuals[0]
-print(mesh.mesh_path, len(mesh.vertices), len(mesh.faces))
+print(mesh.source, len(mesh.vertices), len(mesh.faces))
 print(robot.connections("fr3_link7"))
 ```
 
-For the MuJoCo version, load `example/data/mjcf/franka_fr3/fr3.xml`.
-The accompanying `scene.xml` includes the arm with its gripper, floor, lighting,
-and viewing settings. Both formats name the finger joints `fr3_finger_joint1`
-and `fr3_finger_joint2`.
+The accompanying `example/data/mjcf/franka_fr3/scene.xml` includes the robot,
+floor, lighting, and viewing settings. Finger joints are named
+`fr3_finger_joint1` and `fr3_finger_joint2`.
 
-`Loader().load(path)` is equivalent to `load_robot(path)`. Both accept paths
-as strings or `pathlib.Path` objects. XML is identified by its root element:
-`<robot>` is URDF, `<mujoco>` is MJCF. USD uses OpenUSD's native reader, including
-binary layers and composed references.
+`Loader().load(path)` is equivalent to `load_robot(path)`. Both accept strings
+or `pathlib.Path` objects and support `.xml` and `.mjcf` files with a `<mujoco>`
+root element. MuJoCo resolves includes and mesh paths relative to the model.
+World attachments use `None` as the joint's parent.
 
-For a ROS package stored elsewhere, provide its directory explicitly:
-
-```python
-from yarss import Loader
-
-loader = Loader(package_paths={"my_robot_description": "/path/to/my_robot_description"})
-robot = loader.load("/path/to/robot.urdf")
-```
-
-`package://` references also resolve automatically when the URDF is inside a
-directory named after its ROS package, as in the bundled example. Relative and
-local `file://` mesh paths are supported. Missing files raise an error.
-
-For a USD scene containing several robots, select the subtree that contains
-the desired bodies **and joints**:
-
-```python
-robot = load_robot("scene.usd", usd_root="/World/MyRobot")
-```
-
-Without `usd_root`, all rigid bodies and standard physics joints in the stage
-are collected. USD part/joint names are full prim paths to avoid collisions.
-Empty USD joint endpoints and MJCF world attachments are represented by `None`.
+URDF and USD loading raise `NotImplementedError` for now. This includes URDF
+content with a `<robot>` root in an XML file. The loader has no format-specific
+options; use `load_robot(path)` or `Loader().load(path)`.
 
 ## Viewing an MJCF robot
 
@@ -181,9 +145,9 @@ For MJCF, `Part.local_transform` maps from the part to its parent; `Part.transfo
 is the current world pose. A slider calls `Robot.set_joint_position()` to rebuild
 the child's local pose from its joint anchors and coordinate, then propagate
 world poses down the tree. Motion is measured from each joint's `initial_angle`
-or `initial_distance`, so the FR3 opens at its loaded home pose without a jump. Internally,
-angles remain in radians. Several hinge/slide joints on one body compose in
-source order.
+or `initial_distance`, so the FR3 opens at its loaded home pose without a jump.
+Joint angles and angular limits are stored in degrees, matching the sliders.
+Several hinge/slide joints on one body compose in source order.
 
 These controls edit poses directly. They do not apply forces, prevent collisions,
 or enforce tendons, mimic relations, or equality constraints; the two finger
@@ -219,63 +183,73 @@ the viewer draws these as orange wireframes, including the finger pad boxes.
 Every type directly subclasses `Joint`; each file describes its intended
 constraints in comments. Fixed, sliding, and rotating joints each implement
 `motion_transform()` to return their own motion matrix. Rotations are calculated
-directly from the axis and the angle in radians using Rodrigues' formula.
+directly from the axis and the angle in degrees using Rodrigues' formula.
+Only the trigonometric calculation inside `rotation_transform()` converts that
+angle to radians for NumPy's sine and cosine functions.
 Other types remain placeholders and raise `NotImplementedError` for pose editing.
 There are no constraint solvers yet.
 
 Initial states are explicit fields on the joint subclasses:
 
-- `RotatingJoint` and `UnlimitedRotatingJoint`: `initial_angle` in radians.
+- `RotatingJoint` and `UnlimitedRotatingJoint`: `initial_angle` in degrees.
 - `SlidingJoint`: `initial_distance` in meters.
 - `BallJoint`: `initial_orientation`, a 3x3 rotation matrix in joint coordinates.
 - `FloatingJoint`: `initial_pose`, a 4x4 world transform for an MJCF free joint.
 
 The MJCF loader fills these fields from the model's default joint coordinates.
 They remain unchanged during pose editing. The current scalar coordinate is
-still `joint.position`, in radians for rotation and meters for sliding.
+still `joint.position`, in degrees for rotation and meters for sliding.
 
-| Class | Intended motion | Imported from |
+| Class | Intended motion | MJCF source |
 | --- | --- | --- |
-| `FixedJoint` | No relative motion | URDF, implicit MJCF, USD |
-| `RotatingJoint` | Limited rotation about one axis | URDF revolute, MJCF hinge, USD |
-| `UnlimitedRotatingJoint` | Unlimited rotation about one axis | URDF continuous, unlimited MJCF/USD hinge |
-| `SlidingJoint` | Translation along one axis | URDF prismatic, MJCF slide, USD |
-| `PlanarJoint` | Two translations and one rotation in a plane | URDF |
-| `FloatingJoint` | Three translations and three rotations | URDF, MJCF free |
-| `BallJoint` | Rotation about a common point | MJCF ball, USD spherical |
-| `DistanceJoint` | Fixed or bounded anchor separation | USD |
-| `D6Joint` | Individually free, limited, or locked axes | USD generic joint |
+| `FixedJoint` | No relative motion | Implicit body attachment |
+| `RotatingJoint` | Limited rotation about one axis | Limited hinge |
+| `UnlimitedRotatingJoint` | Unlimited rotation about one axis | Unlimited hinge |
+| `SlidingJoint` | Translation along one axis | Slide |
+| `FloatingJoint` | Three translations and three rotations | Free |
+| `BallJoint` | Rotation about a common point | Ball |
+| `PlanarJoint` | Two translations and one rotation in a plane | Placeholder |
+| `DistanceJoint` | Fixed or bounded anchor separation | Placeholder |
+| `D6Joint` | Individually free, limited, or locked axes | Placeholder |
 | `CylindricalJoint` | Independent slide and spin on one axis | Placeholder |
 | `UniversalJoint` | Rotation about two intersecting axes | Placeholder |
 | `ScrewJoint` | Rotation coupled to translation by pitch | Placeholder |
 
-URDF mimic relationships are retained as metadata on the original joint type.
-MJCF's multiple joints on a body share endpoints and retain their source order.
-`Robot` stores a graph, so USD loops and parallel connections are allowed;
-URDF descriptions are separately checked to be one connected tree.
+MJCF bodies form a tree. Multiple joints on one body share endpoints and retain
+their source order when computing that body's motion.
 
 ## Geometry and coordinate conventions
 
-- `Part.visuals` and `Part.collisions` contain `Geometry` objects. Geometry-free
-  links are retained because joints can connect through them.
-- Mesh vertices are NumPy arrays of shape `(N, 3)`. Faces are tuples of vertex
-  indices, allowing variable-length polygons. URDF meshes also retain `mesh_path`.
-  USD polygons remain polygons; primitives remain shape/dimension records.
-- `Part.transform` maps part coordinates to world coordinates, initially at the file's
-  default pose and updated by the MJCF joint controls. `Part.local_transform` stores
-  the MJCF part's pose relative to its parent. `Geometry.transform` maps geometry
-  coordinates to part coordinates.
-  Joint anchor matrices map the joint frame into each endpoint's part frame.
+- `Part.visuals` and `Part.collisions` contain `Geometry` objects. Bodies without
+  geometry are retained because joints can connect through them.
+- Mesh vertices are NumPy arrays of shape `(N, 3)`. Faces contain triangle vertex
+  indices. Primitives retain their shape and dimensions.
+- `Part.transform` maps part coordinates to world coordinates. It starts at the
+  file's default pose and changes when a joint moves. `Part.local_transform`
+  stores the pose relative to the parent. `Geometry.transform` maps geometry
+  coordinates to part coordinates. Joint anchor matrices map the joint frame
+  into each endpoint's part frame.
 - Transforms are NumPy arrays of shape `(4, 4)` and use column vectors.
   `part.transform @ geometry.transform @ [x, y, z, 1]` gives a homogeneous
-  world vertex. Joint axes are NumPy arrays of shape `(3,)`. Mesh scale is already
-  accounted for in either the geometry matrix or compiled vertices.
-- Lengths are in meters and angles in radians. USD stage units are converted;
-  its up axis is retained in `robot.metadata['up_axis']`. USD part matrices
-  retain authored scale, including nonuniform scale.
-- Scalar joint limits use `joint.limits['position']`. MJCF ball limits use
-  `'angle'`; USD spherical joints use `'coneAngle0Limit'`/`'coneAngle1Limit'`.
-  D6 limits use their native axis names, such as `'transX'` and `'rotZ'`.
+  world vertex. Joint axes are NumPy arrays of shape `(3,)`. MuJoCo's compiled
+  vertices and geometry poses already account for mesh scale and recentering.
+- Lengths are in meters; joint angles and angular limits are in degrees.
+  The loader converts compiled angular coordinates when loading.
+  `rotation_transform()` and `rpy_quaternion()` accept degrees.
+  Imported angular stiffness uses N*m/degree and linear stiffness uses N/m,
+  preserving the physical torque or force for the same displacement.
+- Scalar joint limits use `joint.limits['position']`. Ball limits use `'angle'`.
+  Rotation matrices, quaternions, axes, and scale factors are dimensionless.
+
+Run the MJCF unit and loader checks with:
+
+```bash
+python3 example/check_units.py
+```
+
+The separate viewer check above exercises every FR3 slider against native
+MuJoCo kinematics. Source model files retain their authored angle convention;
+YARSS joint coordinates use degrees after loading.
 
 ## Current scope
 
@@ -291,14 +265,6 @@ Actuator, tendon, and equality-constraint counts are recorded; their behavior an
 additional constraints are not imported. Heightfields, flexes, and plugin-defined
 shapes are outside this initial rigid-geometry implementation.
 
-USD reads default-time geometry and standard `UsdPhysics` schemas. Physics
-definitions must be authored in the file; an arbitrary mesh-only USD file is not
-a robot. Time samples, skeletal animation, and PhysX-specific extensions are
-outside this version. Supported shapes are meshes, boxes, spheres, capsules,
-cylinders, and cones. Unsupported robot geometry raises an error.
-
-Xacro files must be expanded to URDF before loading.
-The bundled FR3 URDF is already expanded from the manufacturer's included source.
 The complete MJCF is included directly. The native MuJoCo gripper actuator is
 `fr3_actuator8`: control 0 closes it, and 255 opens it fully.
 
@@ -310,9 +276,6 @@ relative to the loaded geometry is `joint.position - joint.initial_angle` for
 rotating joints and `joint.position - joint.initial_distance` for sliding joints.
 The loader reads this default pose without stepping physics.
 
-The URDF retains the manufacturer's zero-coordinate pose; it has no standard
-initial joint-state field. Its all-zero pose is not the arm's home configuration.
-
 ## Code formatting
 
 Use two spaces per indentation level, never tab characters. EditorConfig and
@@ -320,5 +283,5 @@ Ruff are configured to preserve this convention, including for Python.
 
 ```bash
 python3 -m pip install -e './yarss[dev]'
-python3 -m ruff format --config yarss/pyproject.toml yarss example/viewer
+python3 -m ruff format --config yarss/pyproject.toml yarss example
 ```

@@ -31,8 +31,8 @@ Adapted from MuJoCo Menagerie commit
 
 The hand bodies, defaults, assets, collision exclusions, tendon, equality
 constraint, and actuator are embedded directly in the FR3 model. Hand names
-use the `fr3_` prefix. Its wrist mounting transform matches the manufacturer
-URDF: 107 mm along wrist Z and -45 degrees about Z. Reference geometry is posed
+use the `fr3_` prefix. Its wrist mounting transform is 107 mm along wrist Z and
+-45 degrees about Z. Reference geometry is posed
 at home with corresponding joint reference values; meshes and joint limits are
 unchanged. The home keyframe includes the fingers' open positions and gripper
 control. `fr3.png` is a native MuJoCo render of the bundled model's initial pose.

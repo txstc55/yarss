@@ -10,10 +10,11 @@ from ..transforms import Matrix4, Vector3
 
 @dataclass
 class JointLimit:
-  """Meters or radians; None means that bound was not specified.
+  """Bounds in meters or degrees; None means that limit was not specified.
 
-  For USD D6 joints, lower > upper means the axis is locked.
-  Effort and velocity are retained when the source specifies them.
+  For D6 joint placeholders, lower > upper means the axis is locked.
+  Effort is a force limit in N or a torque limit in N*m.
+  Velocity is a speed limit in m/s or degrees/s, when supplied by the source.
   """
 
   lower: float | None = None
@@ -24,7 +25,10 @@ class JointLimit:
 
 @dataclass
 class Mimic:
-  """Future behavior: q = multiplier * referenced_joint.q + offset."""
+  """Future behavior: q = multiplier * referenced_joint.q + offset.
+
+  Offset uses the driven joint's units: meters or degrees.
+  """
 
   joint: str
   multiplier: float = 1.0
@@ -39,7 +43,7 @@ class Joint:
   Axis is expressed in the joint frame, not in world coordinates.
   Scalar limits use the key 'position'; D6 limits use transX/Y/Z, rotX/Y/Z.
   Multiple MJCF joints on one body share endpoints and retain source order.
-  ``position`` is the current scalar coordinate, in radians or meters.
+  ``position`` is the current scalar coordinate, in degrees or meters.
 
   Future solvers should use these definitions to construct constraints,
   apply limits/drives, and update part poses. Loading does none of that.

@@ -1,7 +1,8 @@
 """NumPy helpers for pose matrices and quaternions.
 
 Matrices use column vectors: world_point = transform @ local_point.
-Positions are in meters; quaternions are ordered (w, x, y, z).
+Positions are in meters and angle arguments are in degrees.
+Quaternions are dimensionless and ordered (w, x, y, z).
 """
 
 import numpy as np
@@ -13,7 +14,7 @@ Matrix4 = NDArray[np.float64]
 
 
 def rotation_transform(axis: Vector3, angle: float) -> Matrix4:
-  """Build a 4x4 rotation directly from an axis and an angle in radians."""
+  """Build a 4x4 rotation directly from an axis and an angle in degrees."""
   axis = np.asarray(axis, dtype=float)
   length = np.linalg.norm(axis)
   if length == 0:
@@ -22,7 +23,9 @@ def rotation_transform(axis: Vector3, angle: float) -> Matrix4:
   x, y, z = axis
   # cross @ vector gives the cross product of the axis with that vector.
   cross = np.array([[0, -z, y], [z, 0, -x], [-y, x, 0]])
-  cosine, sine = np.cos(angle), np.sin(angle)
+  # NumPy's trigonometric functions take radians; joint state stays in degrees.
+  radians = np.deg2rad(angle)
+  cosine, sine = np.cos(radians), np.sin(radians)
   # Rodrigues' formula: rotate around the axis while leaving the axis itself fixed.
   matrix = np.eye(4)
   matrix[:3, :3] = cosine * np.eye(3) + (1 - cosine) * np.outer(axis, axis) + sine * cross
@@ -52,8 +55,8 @@ def transform(
 
 
 def rpy_quaternion(rpy) -> NDArray[np.float64]:
-  """URDF fixed-axis roll, pitch, yaw (radians) to a quaternion."""
-  half_angles = np.asarray(rpy, dtype=float) / 2
+  """Fixed-axis roll, pitch, yaw (degrees) to a quaternion."""
+  half_angles = np.deg2rad(np.asarray(rpy, dtype=float)) / 2
   cr, cp, cy = np.cos(half_angles)
   sr, sp, sy = np.sin(half_angles)
   return np.array(

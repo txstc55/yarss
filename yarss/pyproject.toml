@@ -5,21 +5,17 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "yarss"
 version = "0.1.0"
-description = "Yet Another Robotics Simulation System: robot description loaders"
+description = "Yet Another Robotics Simulation System: MJCF loading and visualization"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
   "numpy>=1.26",
-  "trimesh>=4.6",
-  "pycollada>=0.9",
   "mujoco>=3.3,<4",
   "pyvista>=0.46",
 ]
 
 [project.optional-dependencies]
-usd = ["usd-core>=25.5"]
 dev = ["ruff"]
-assets = ["xacro==2.1.1"]
 
 [tool.setuptools]
 # This directory is the yarss package itself.

@@ -1,4 +1,4 @@
-"""The shared representation returned by all three loaders."""
+"""A robot's parts, joints, and editable poses."""
 
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -14,8 +14,8 @@ from ..transforms import Matrix4
 class Robot:
   """Parts are graph nodes; joints are edges, in source order.
 
-  A graph permits USD closed loops and several MJCF joints between the
-  same pair of bodies. It does not assume every robot is a URDF tree.
+  Several MJCF joints can connect the same pair of bodies and retain their
+  source order when composing motion.
   """
 
   name: str
@@ -50,7 +50,7 @@ class Robot:
     """Edit an MJCF hinge/slide coordinate and propagate its child body's pose.
 
     This is forward kinematics only: no forces, contacts, or coupled joints.
-    Internal angles stay in radians; the viewer converts its degree sliders.
+    Angles are in degrees and sliding distances are in meters, just like the sliders.
     """
     if self.metadata.get("format") != "mjcf":
       raise ValueError("Interactive joint poses currently support MJCF robots only")
