@@ -22,14 +22,14 @@ class Viewer:
     self.collision_meshes: list[pv.DataSet] = []
     self.plotter = pv.Plotter(off_screen=off_screen)
     self.robots: list[Robot] = []
-    # Keep vertices and normals in part coordinates; pose edits are rigid transforms.
-    self._part_meshes: list[tuple[Part, pv.PolyData, np.ndarray, np.ndarray]] = []
-    self._mesh_actors: dict[int, pv.Actor] = {}
-    self._joint_axes: list[tuple[Robot, Joint, pv.PolyData, np.ndarray, float]] = []
+    # Robot meshes stay in part coordinates; actors carry their world transforms.
+    self._mesh_parts: dict[int, Part] = {}
+    self._part_actors: dict[Part, list[pv.Actor]] = {}
+    self._joint_axes: list[tuple[Robot, Joint, pv.Actor, float]] = []
     self._joint_label_points: pv.PolyData | None = None
 
   def add_robot(self, robot: Robot) -> None:
-    """Append every part's visual and collision geometry in world coordinates."""
+    """Append static visual and collision meshes in their owning part's coordinates."""
     self.robots.append(robot)
     for part in robot.parts.values():
       for geometries, meshes in (
@@ -38,40 +38,42 @@ class Viewer:
       ):
         for geometry in geometries:
           mesh = _geometry_mesh(geometry)
-          part_points = mesh.points @ geometry.transform[:3, :3].T + geometry.transform[:3, 3]
-          mesh.points = part_points
-          mesh.compute_normals(cell_normals=False, inplace=True)
-          part_normals = mesh.point_data["Normals"].copy()
-          # Part.transform already includes ancestors. Vertices and normals are rows.
-          rotation = part.transform[:3, :3]
-          mesh.points = part_points @ rotation.T + part.transform[:3, 3]
-          mesh.point_data["Normals"] = part_normals @ rotation.T
+          mesh.transform(geometry.transform, inplace=True)
           meshes.append(mesh)
-          self._part_meshes.append((part, mesh, part_points, part_normals))
+          self._mesh_parts[id(mesh)] = part
 
   def show(self, show_collisions: bool = True) -> None:
     """Draw meshes, collision visibility, and degree/meter sliders for MJCF joints."""
     visual_actors = []
     collision_actors = []
+    self._part_actors.clear()
     for index, mesh in enumerate(self.meshes):
+      part = self._mesh_parts.get(id(mesh))
       actor = self.plotter.add_mesh(
         mesh,
         name=f"mesh_{index}",
         color="#aebdcb",
         smooth_shading=True,
+        user_matrix=part.transform if part is not None else None,
       )
       visual_actors.append(actor)
-      self._mesh_actors[id(mesh)] = actor
+      if part is not None:
+        # Keep PyVista's shaded output as static data, detached from its normal filter.
+        actor.mapper.dataset = actor.mapper.dataset
+        self._part_actors.setdefault(part, []).append(actor)
     for index, mesh in enumerate(self.collision_meshes):
+      part = self._mesh_parts.get(id(mesh))
       actor = self.plotter.add_mesh(
         mesh,
         name=f"collision_{index}",
         color="#d65c00",
         style="wireframe",
         line_width=1.5,
+        user_matrix=part.transform if part is not None else None,
       )
       collision_actors.append(actor)
-      self._mesh_actors[id(mesh)] = actor
+      if part is not None:
+        self._part_actors.setdefault(part, []).append(actor)
 
     if collision_actors:
 
@@ -115,14 +117,16 @@ class Viewer:
       positions = np.array([part.transform[:3, 3] for part in robot.parts.values()])
       length = max(float(np.linalg.norm(np.ptp(positions, axis=0))), 0.1) * 0.25
       axis_mesh = pv.Arrow(direction=joint.axis, scale=length, shaft_radius=0.02, tip_radius=0.07)
-      axis_points = axis_mesh.points.copy()
       frame = robot.joint_world_frame(joint.name)
-      axis_mesh.points = axis_points @ frame[:3, :3].T + frame[:3, 3]
-      self._joint_axes.append((robot, joint, axis_mesh, axis_points, length))
       color = "#16803c" if joint.kind == "sliding" else "#2563eb"
-      self.plotter.add_mesh(
-        axis_mesh, name=f"joint_axis_{len(self._joint_axes) - 1}", color=color, lighting=False
+      actor = self.plotter.add_mesh(
+        axis_mesh,
+        name=f"joint_axis_{len(self._joint_axes)}",
+        color=color,
+        lighting=False,
+        user_matrix=frame,
       )
+      self._joint_axes.append((robot, joint, actor, length))
 
     self._joint_label_points = pv.PolyData(np.zeros((len(controls), 3)))
     self._joint_label_points.point_data["joint_name"] = [joint.name for _, joint in controls]
@@ -199,16 +203,11 @@ class Viewer:
     # PyVista also calls the callback when it first creates each slider.
     if np.isclose(value, joint.value, atol=1e-12, rtol=0):
       return
-    updated = robot.set_joint_value(joint.name, value)
-    for part, mesh, part_points, part_normals in self._part_meshes:
-      if part not in updated:
-        continue
-      rotation = part.transform[:3, :3]
-      mesh.points = part_points @ rotation.T + part.transform[:3, 3]
-      # A rigid rotation changes normal directions without changing mesh connectivity.
-      mesh.point_data["Normals"] = part_normals @ rotation.T
-      # Smooth shading can create a derived dataset; reuse the actor captured in show().
-      self._mesh_actors[id(mesh)].mapper.dataset = mesh
+    updated = set(robot.set_joint_value(joint, value))
+    for part in updated:
+      for actor in self._part_actors.get(part, ()):
+        # VTK transforms the static mesh and its lighting normals while rendering.
+        actor.user_matrix = part.transform
     self._update_joint_axes(updated)
     self.plotter.reset_camera_clipping_range()
     self.plotter.render()
@@ -217,11 +216,11 @@ class Viewer:
     if self._joint_label_points is None:
       return
     points = self._joint_label_points.points.copy()
-    for index, (robot, joint, mesh, axis_points, length) in enumerate(self._joint_axes):
+    for index, (robot, joint, actor, length) in enumerate(self._joint_axes):
       if updated is not None and joint.child not in updated:
         continue
       frame = robot.joint_world_frame(joint.name)
-      mesh.points = axis_points @ frame[:3, :3].T + frame[:3, 3]
+      actor.user_matrix = frame
       direction = frame[:3, :3] @ joint.axis
       points[index] = frame[:3, 3] + length * direction
     self._joint_label_points.points = points

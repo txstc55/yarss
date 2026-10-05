@@ -135,10 +135,11 @@ viewer.show()
 ```
 
 `add_robot()` appends the visual geometry from every part to `viewer.meshes`.
-It appends collision geometry to `viewer.collision_meshes`. It preserves meshes
-already in either list. The viewer stores no single robot; other PyVista meshes
-can also be appended in world coordinates. `show()` renders both lists, making
-the visual surfaces translucent while collision shapes are visible. Use
+It appends collision geometry to `viewer.collision_meshes`. These robot meshes
+stay in part coordinates; each actor's matrix places its mesh in the world.
+It preserves meshes already in either list. The viewer stores no single robot;
+other PyVista meshes can also be appended in world coordinates. `show()` renders
+both lists, making the visual surfaces translucent while collision shapes are visible. Use
 `viewer.show(show_collisions=False)` to start with the collision overlay hidden;
 the checkbox can still turn it on.
 
@@ -151,10 +152,15 @@ so the FR3 opens at its loaded home pose without a jump.
 Joint angles and angular limits are stored in degrees, matching the sliders.
 Several hinge/slide joints on one body compose in source order.
 Parts store their connected parents, children, and incoming joints when a joint
-is created. Pose updates follow those connections and return the affected parts;
-they do not rebuild the whole robot's graph. The viewer updates only those parts'
-meshes and joint axes, rotating cached normals and arrow vertices instead of
-rebuilding them on every slider movement.
+is created. `Robot.finish_setup()` precomputes `part.affected_parts`: a list with
+the part itself first, followed by its descendants in parent-before-child order.
+The loader calls this automatically. When building a robot manually, call
+`robot.finish_setup()` after adding all parts and joints, and again after changing
+their connections. Pose updates iterate and return that same cached list.
+The viewer updates only those parts' actor matrices and joint-axis matrices.
+Vertices remain fixed, and YARSS keeps no separate vertex or normal caches.
+PyVista supplies normals for smooth lighting at setup; VTK transforms them while
+rendering, so slider updates do not recompute or upload mesh vertices or normals.
 
 These controls edit poses directly. They do not apply forces, prevent collisions,
 or enforce tendons, mimic relations, or equality constraints; the two finger
@@ -169,14 +175,20 @@ kinematics without opening an interactive window:
 python3 example/viewer/check_joint_controls.py
 ```
 
-For each geometry, the viewer computes:
+For each geometry, the viewer builds a mesh in part coordinates once:
 
 ```python
-world = part.transform @ geometry.transform
-world_vertices = geometry.vertices @ world[:3, :3].T + world[:3, 3]
+mesh.transform(geometry.transform, inplace=True)
 ```
 
-The second line applies the matrix to an entire `N x 3` array of vertices.
+To display or move that mesh, it sets:
+
+```python
+actor.user_matrix = part.transform
+```
+
+The renderer combines this matrix with the static mesh vertices. `mesh.points`
+therefore stays in part coordinates even after a slider moves the robot.
 `Part.transform` already includes all ancestors, so their matrices must not be
 applied again. The viewer preserves the source geometry and joint anchor frames;
 sliders update joint values and part transforms.
@@ -214,7 +226,7 @@ unimplemented.
 ```python
 joint = robot.joints["fr3_joint4"]
 print(joint.initial_value, joint.value)
-robot.set_joint_value(joint.name, -120.0)  # Degrees for this rotating joint.
+robot.set_joint_value(joint, -120.0)  # Degrees for this rotating joint.
 ```
 
 | Class | Intended motion | MJCF source |
