@@ -54,6 +54,8 @@ class Part:
   connected_children: list[Part] = field(default_factory=list, repr=False)
   connected_parents: list[Part | None] = field(default_factory=list, repr=False)
   incoming_joints: list[Joint] = field(default_factory=list, repr=False)
+  # Filled by Robot.finish_setup(): this part first, then its descendants.
+  affected_parts: list[Part] = field(default_factory=list, init=False, repr=False)
 
   def add_connected_child(self, child: Part) -> None:
     """Record a child once, even when several joints connect the same parts."""

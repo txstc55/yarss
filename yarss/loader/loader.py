@@ -29,7 +29,7 @@ class Loader:
     from .mjcf import load_mjcf
 
     robot = load_mjcf(path)
-    robot.validate()
+    robot.finish_setup()
     return robot
 
 
