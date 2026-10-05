@@ -76,12 +76,13 @@ print(robot.name)
 print([part.name for part in robot.roots])
 
 for joint in robot.joints.values():
-  print(joint.name, joint.kind, joint.parent, "->", joint.child)
+  parent_name = joint.parent.name if joint.parent is not None else "world"
+  print(joint.name, joint.kind, parent_name, "->", joint.child.name)
 
 wrist = robot.parts["fr3_link7"]
 mesh = wrist.visuals[0]
 print(mesh.source, len(mesh.vertices), len(mesh.faces))
-print(robot.connections("fr3_link7"))
+print([joint.name for joint in robot.connections("fr3_link7")])
 ```
 
 The accompanying `example/data/mjcf/franka_fr3/scene.xml` includes the robot,
@@ -91,7 +92,8 @@ floor, lighting, and viewing settings. Finger joints are named
 `Loader().load(path)` is equivalent to `load_robot(path)`. Both accept strings
 or `pathlib.Path` objects and support `.xml` and `.mjcf` files with a `<mujoco>`
 root element. MuJoCo resolves includes and mesh paths relative to the model.
-World attachments use `None` as the joint's parent.
+Each joint's `parent` and `child` refer directly to the `Part` objects in
+`robot.parts`. World attachments use `None` as the joint's parent.
 
 URDF and USD loading raise `NotImplementedError` for now. This includes URDF
 content with a `<robot>` root in an XML file. The loader has no format-specific
@@ -148,6 +150,11 @@ world poses down the tree. Motion is measured from each joint's `initial_value`,
 so the FR3 opens at its loaded home pose without a jump.
 Joint angles and angular limits are stored in degrees, matching the sliders.
 Several hinge/slide joints on one body compose in source order.
+Parts store their connected parents, children, and incoming joints when a joint
+is created. Pose updates follow those connections and return the affected parts;
+they do not rebuild the whole robot's graph. The viewer updates only those parts'
+meshes and joint axes, rotating cached normals and arrow vertices instead of
+rebuilding them on every slider movement.
 
 These controls edit poses directly. They do not apply forces, prevent collisions,
 or enforce tendons, mimic relations, or equality constraints; the two finger
@@ -227,6 +234,9 @@ robot.set_joint_value(joint.name, -120.0)  # Degrees for this rotating joint.
 
 MJCF bodies form a tree. Multiple joints on one body share endpoints and retain
 their source order when computing that body's motion.
+`joint.child_frame_inverse` is computed once during construction and reused
+for pose updates and joint-axis drawing. The child frame and its cached inverse
+are read-only NumPy arrays; slider movements change part poses, not these frames.
 
 ## Geometry and coordinate conventions
 

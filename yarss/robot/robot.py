@@ -38,19 +38,18 @@ class Robot:
   def roots(self) -> list[Part]:
     """Parts without an incoming part-to-part edge; loops may have none."""
     children = {j.child for j in self.joints.values() if j.parent is not None}
-    return [p for name, p in self.parts.items() if name not in children]
+    return [part for part in self.parts.values() if part not in children]
 
   def connections(self, part_name: str) -> list[Joint]:
     """Return all joints touching a part, including world attachments."""
-    if part_name not in self.parts:
-      raise KeyError(part_name)
-    return [j for j in self.joints.values() if part_name in (j.parent, j.child)]
+    part = self.parts[part_name]
+    return [j for j in self.joints.values() if j.parent is part or j.child is part]
 
-  def set_joint_value(self, name: str, value: float) -> None:
-    """Edit an MJCF hinge/slide coordinate and propagate its child body's pose.
-
+  def set_joint_value(self, name: str, value: float) -> set[Part]:
+    """
     This is forward kinematics only: no forces, contacts, or coupled joints.
     Angles are in degrees and sliding distances are in meters, just like the sliders.
+    Return the affected parts so the viewer can update only their geometry.
     """
     if self.metadata.get("format") != "mjcf":
       raise ValueError("Interactive joint poses currently support MJCF robots only")
@@ -60,42 +59,43 @@ class Robot:
     if not np.isfinite(value):
       raise ValueError("Joint value must be finite")
 
-    attached = [j for j in self.joints.values() if j.child == joint.child]
+    attached = joint.child.incoming_joints
     if any(j.kind not in {"fixed", "rotating", "unlimited_rotating", "sliding"} for j in attached):
       raise ValueError("Pose editing requires fixed, hinge, or slide joints on this body")
     joint.value = float(value)
     # Start from the loaded body pose, then apply each joint in source order.
     # Rebuild from absolute coordinates so slider movements never accumulate drift.
-    local = attached[0].parent_frame @ np.linalg.inv(attached[0].child_frame)
+    local = attached[0].parent_frame @ attached[0].child_frame_inverse
     for connection in attached:
       anchor = connection.child_frame
-      local = local @ anchor @ connection.motion_transform() @ np.linalg.inv(anchor)
-    self.parts[joint.child].local_transform = local
+      local = local @ anchor @ connection.motion_transform() @ connection.child_frame_inverse
+    joint.child.local_transform = local
 
-    # MJCF bodies form a tree, even when a body contains several joints.
-    parents = {j.child: j.parent for j in self.joints.values()}
-    children: dict[str | None, set[str]] = {}
-    for connection in self.joints.values():
-      children.setdefault(connection.parent, set()).add(connection.child)
+    # MJCF has one parent per body; several joints can share that same parent.
+    updated: set[Part] = set()
     pending = [joint.child]
     while pending:
-      child = self.parts[pending.pop()]
-      parent = parents[child.name]
-      parent_world = self.parts[parent].transform if parent is not None else np.eye(4)
-      child.transform = parent_world @ child.local_transform
-      pending.extend(children.get(child.name, ()))
+      child = pending.pop()
+      parent = child.connected_parents[0]
+      child.transform = (
+        parent.transform @ child.local_transform
+        if parent is not None
+        else child.local_transform.copy()
+      )
+      updated.add(child)
+      pending.extend(child.connected_children)
+    return updated
 
   def joint_world_frame(self, name: str) -> Matrix4:
     """Locate an MJCF joint's anchor, including earlier joints on the same body."""
     joint = self.joints[name]
-    local = joint.parent_frame @ np.linalg.inv(joint.child_frame)
-    for connection in self.joints.values():
+    local = joint.parent_frame @ joint.child_frame_inverse
+    for connection in joint.child.incoming_joints:
       if connection is joint:
         break
-      if connection.child == joint.child:
-        anchor = connection.child_frame
-        local = local @ anchor @ connection.motion_transform() @ np.linalg.inv(anchor)
-    parent_world = self.parts[joint.parent].transform if joint.parent is not None else np.eye(4)
+      anchor = connection.child_frame
+      local = local @ anchor @ connection.motion_transform() @ connection.child_frame_inverse
+    parent_world = joint.parent.transform if joint.parent is not None else np.eye(4)
     return parent_world @ local @ joint.child_frame
 
   def validate(self) -> None:
@@ -103,11 +103,11 @@ class Robot:
     if not self.parts:
       raise ValueError(f"No robot parts found in {self.source}")
     for joint in self.joints.values():
-      if joint.parent == joint.child:
+      if joint.parent is joint.child:
         raise ValueError(f"Joint {joint.name!r} must connect different endpoints")
       for endpoint in (joint.parent, joint.child):
-        if endpoint is not None and endpoint not in self.parts:
-          raise ValueError(f"Joint {joint.name!r} references missing part {endpoint!r}")
+        if endpoint is not None and self.parts.get(endpoint.name) is not endpoint:
+          raise ValueError(f"Joint {joint.name!r} references unregistered part {endpoint.name!r}")
       if joint.mimic and joint.mimic.joint not in self.joints:
         raise ValueError(f"Joint {joint.name!r} mimics missing joint {joint.mimic.joint!r}")
     for part in self.parts.values():

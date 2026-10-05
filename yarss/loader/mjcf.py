@@ -87,8 +87,8 @@ def load_mjcf(path: Path) -> Robot:
     mujoco.mjtJoint.mjJNT_HINGE: RotatingJoint,
   }
   for body_id in range(1, model.nbody):
-    parent = names[int(model.body_parentid[body_id])]
-    child = names[body_id]
+    parent = robot.parts.get(names[int(model.body_parentid[body_id])])
+    child = robot.parts[names[body_id]]
     body_pose = transform(model.body_pos[body_id], model.body_quat[body_id])
     start, count = int(model.body_jntadr[body_id]), int(model.body_jntnum[body_id])
     if count == 0:

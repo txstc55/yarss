@@ -8,17 +8,19 @@ import mujoco
 import numpy as np
 import pyvista as pv
 
-from yarss import load_robot
+from yarss import Part, Robot, load_robot
 from yarss.joints import FixedJoint, RotatingJoint, SlidingJoint, UnlimitedRotatingJoint
+from yarss.transforms import rotation_transform
 from yarss.viewer import Viewer
 
 
 def check_joint_motions():
   """Check a diagonal, non-unit axis with known movements and nonzero initial values."""
+  parent, child = Part("parent"), Part("child")
   axis = np.array([0.0, 1.0, 1.0])
   diagonal = 1 / np.sqrt(2)
   for kind in (RotatingJoint, UnlimitedRotatingJoint):
-    joint = kind("turn", "parent", "child", axis=axis, initial_value=30.0)
+    joint = kind("turn", parent, child, axis=axis, initial_value=30.0)
     joint.value = 30.0
     np.testing.assert_allclose(joint.motion_transform(), np.eye(4), atol=1e-12)
     for angle in (90.0, 810.0):
@@ -31,8 +33,8 @@ def check_joint_motions():
 
   joint = SlidingJoint(
     "slide",
-    "parent",
-    "child",
+    parent,
+    child,
     axis=axis,
     value=0.14,
     initial_value=0.04,
@@ -40,10 +42,51 @@ def check_joint_motions():
   expected = np.eye(4)
   expected[:3, 3] = [0, 0.1 * diagonal, 0.1 * diagonal]
   np.testing.assert_allclose(joint.motion_transform(), expected, atol=1e-12)
-  np.testing.assert_array_equal(
-    FixedJoint("fixed", "parent", "child").motion_transform(), np.eye(4)
-  )
+  np.testing.assert_array_equal(FixedJoint("fixed", parent, child).motion_transform(), np.eye(4))
   np.testing.assert_array_equal(axis, [0, 1, 1])
+
+
+def check_joint_parts_and_inverse():
+  """Use shared Part objects and invert a rotated, offset child frame only once."""
+  parent, child = Part("parent"), Part("child")
+  anchor = rotation_transform(np.array([1.0, 2.0, 3.0]), 35.0)
+  anchor[:3, 3] = [0.1, 0.2, 0.3]
+  with patch("numpy.linalg.inv", wraps=np.linalg.inv) as invert:
+    joint = RotatingJoint("turn", parent, child, parent_frame=anchor.copy(), child_frame=anchor)
+    assert invert.call_count == 1
+  inverse = joint.child_frame_inverse
+  np.testing.assert_allclose(joint.child_frame @ inverse, np.eye(4), atol=1e-12)
+  assert not joint.child_frame.flags.writeable
+  assert not inverse.flags.writeable
+  anchor[0, 3] = 100.0
+  assert joint.child_frame[0, 3] == 0.1
+
+  robot = Robot("parts", Path(__file__), metadata={"format": "mjcf"})
+  robot.add_part(parent)
+  robot.add_part(child)
+  robot.add_joint(FixedJoint("world", None, parent))
+  robot.add_joint(joint)
+  robot.validate()
+  assert joint.parent is robot.parts["parent"]
+  assert joint.child is robot.parts["child"]
+  assert robot.roots == [parent]
+  assert [j.name for j in robot.connections("parent")] == ["world", "turn"]
+  assert [j.name for j in robot.connections("child")] == ["turn"]
+  with patch("numpy.linalg.inv", side_effect=AssertionError("Use the cached inverse")):
+    for value in (45.0, -30.0, 0.0):
+      robot.set_joint_value("turn", value)
+      robot.joint_world_frame("turn")
+  assert joint.child_frame_inverse is inverse
+  np.testing.assert_allclose(child.transform, np.eye(4), atol=1e-12)
+
+  # Matching names are insufficient: joints must point at the registered Part itself.
+  joint.child = Part("child")
+  try:
+    robot.validate()
+  except ValueError as error:
+    assert "unregistered part 'child'" in str(error)
+  else:
+    raise AssertionError("An unregistered Part with the same name must be rejected")
 
 
 def check_initial_states():
@@ -92,6 +135,11 @@ def check_initial_states():
         robot.joints["pose"].initial_value, robot.parts["free_body"].transform, atol=1e-12
       )
       for joint in robot.joints.values():
+        assert joint.parent is None
+        assert joint.child is robot.parts[joint.child.name]
+        np.testing.assert_allclose(
+          joint.child_frame @ joint.child_frame_inverse, np.eye(4), atol=1e-12
+        )
         np.testing.assert_array_equal(joint.value, joint.initial_value)
         if isinstance(joint.value, np.ndarray):
           assert not np.shares_memory(joint.value, joint.initial_value)
@@ -117,6 +165,10 @@ def check_poses(robot, model, data):
     np.testing.assert_allclose(parent @ part.local_transform, part.transform, atol=1e-12)
   for joint_id in range(model.njnt):
     joint = robot.joints[model.joint(joint_id).name]
+    body_id = model.jnt_bodyid[joint_id]
+    parent_id = model.body_parentid[body_id]
+    assert joint.child is robot.parts[model.body(body_id).name]
+    assert joint.parent is (robot.parts[model.body(parent_id).name] if parent_id else None)
     frame = robot.joint_world_frame(joint.name)
     np.testing.assert_allclose(frame[:3, 3], data.xanchor[joint_id], atol=1e-12)
     np.testing.assert_allclose(frame[:3, :3] @ joint.axis, data.xaxis[joint_id], atol=1e-12)
@@ -142,7 +194,7 @@ def check_meshes(viewer, model, data):
       np.testing.assert_array_equal(actor_mesh.points, mesh.points)
 
   expected_labels = []
-  for index, (_, joint, mesh, length) in enumerate(viewer._joint_axes):
+  for index, (_, joint, mesh, _, length) in enumerate(viewer._joint_axes):
     joint_id = model.joint(joint.name).id
     expected_labels.append(data.xanchor[joint_id] + length * data.xaxis[joint_id])
     actor_mesh = viewer.plotter.actors[f"joint_axis_{index}"].mapper.dataset
@@ -171,6 +223,13 @@ def check_shared_body():
     path = Path(folder) / "shared_body.xml"
     path.write_text(xml)
     robot = load_robot(path)
+    base, moving, tip = (robot.parts[name] for name in ("base", "moving", "tip"))
+    assert base.connected_parents == [None]
+    assert base.connected_children == [moving]
+    assert moving.connected_parents == [base]
+    assert moving.connected_children == [tip]
+    assert [joint.name for joint in moving.incoming_joints] == ["hinge", "slide"]
+    assert robot.set_joint_value("hinge", robot.joints["hinge"].value) == {moving, tip}
     model = mujoco.MjModel.from_xml_path(str(path))
     data = mujoco.MjData(model)
     viewer = Viewer(off_screen=True)
@@ -199,6 +258,7 @@ def check_shared_body():
 
 def main():
   check_joint_motions()
+  check_joint_parts_and_inverse()
   check_initial_states()
   path = Path(__file__).resolve().parents[1] / "data/mjcf/franka_fr3/fr3.xml"
   robot = load_robot(path)
@@ -256,15 +316,37 @@ def main():
       initial = model.qpos0[model.jnt_qposadr[joint_id]] * scale
       movements.extend((name, value) for value in (lower, upper, (lower + upper) / 2, initial))
     for name, value in movements:
+      previous_poses = {part: part.transform for part in robot.parts.values()}
+      mesh_times = [mesh.GetMTime() for _, mesh, _, _ in viewer._part_meshes]
+      axis_times = [mesh.GetMTime() for _, _, mesh, _, _ in viewer._joint_axes]
       widget = widgets[name]
       widget.GetRepresentation().SetValue(value)
-      widget.InvokeEvent("InteractionEvent")
+      with patch.object(
+        pv.PolyData, "compute_normals", side_effect=AssertionError("Use cached normals")
+      ):
+        widget.InvokeEvent("InteractionEvent")
+      for (part, mesh, _, _), before in zip(viewer._part_meshes, mesh_times, strict=True):
+        if part.transform is previous_poses[part]:
+          assert mesh.GetMTime() == before
+      for (_, joint, mesh, _, _), before in zip(viewer._joint_axes, axis_times, strict=True):
+        if joint.child.transform is previous_poses[joint.child]:
+          assert mesh.GetMTime() == before
       joint_id = model.joint(name).id
       qpos = value if model.jnt_type[joint_id] == mujoco.mjtJoint.mjJNT_SLIDE else np.deg2rad(value)
       data.qpos[model.jnt_qposadr[joint_id]] = qpos
       np.testing.assert_allclose(robot.joints[name].value, value, atol=1e-12)
       check_poses(robot, model, data)
       check_meshes(viewer, model, data)
+      if name == "fr3_joint1" and value == 35:
+        # Independently rebuild normals once to verify lighting after a rotated pose.
+        for part, mesh, _, _ in viewer._part_meshes:
+          if part is robot.parts["fr3_link4"]:
+            expected = mesh.copy(deep=True)
+            del expected.point_data["Normals"]
+            expected.compute_normals(cell_normals=False, inplace=True)
+            np.testing.assert_allclose(
+              mesh.point_data["Normals"], expected.point_data["Normals"], atol=1e-5
+            )
       np.testing.assert_array_equal(np.asarray(viewer.plotter.camera_position), camera)
     for geometry, original in source_vertices:
       np.testing.assert_array_equal(geometry.vertices, original)
@@ -277,7 +359,8 @@ def main():
     viewer.plotter.close()
   check_shared_body()
   print(
-    "Passed: degree-based states and limits, direct motions, all nine FR3 sliders at both limits, "
+    "Passed: shared Part endpoints, cached child-frame inverses, degree-based states and limits, "
+    "direct motions, all nine FR3 sliders at both limits, "
     "midpoints, and initial positions, child/descendant poses, "
     "meshes, axes, labels, and unbounded sliders with shared-body joints."
   )

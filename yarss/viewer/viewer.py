@@ -22,9 +22,10 @@ class Viewer:
     self.collision_meshes: list[pv.DataSet] = []
     self.plotter = pv.Plotter(off_screen=off_screen)
     self.robots: list[Robot] = []
-    # Keep vertices in part coordinates so every update starts from the original shape.
-    self._part_meshes: list[tuple[Part, pv.PolyData, np.ndarray]] = []
-    self._joint_axes: list[tuple[Robot, Joint, pv.PolyData, float]] = []
+    # Keep vertices and normals in part coordinates; pose edits are rigid transforms.
+    self._part_meshes: list[tuple[Part, pv.PolyData, np.ndarray, np.ndarray]] = []
+    self._mesh_actors: dict[int, pv.Actor] = {}
+    self._joint_axes: list[tuple[Robot, Joint, pv.PolyData, np.ndarray, float]] = []
     self._joint_label_points: pv.PolyData | None = None
 
   def add_robot(self, robot: Robot) -> None:
@@ -38,13 +39,15 @@ class Viewer:
         for geometry in geometries:
           mesh = _geometry_mesh(geometry)
           part_points = mesh.points @ geometry.transform[:3, :3].T + geometry.transform[:3, 3]
-
-          # Geometry -> part -> world. Part.transform already includes ancestors.
-          world = part.transform @ geometry.transform
-          # Vertices are rows, so transpose the matrix's rotation/scale block.
-          mesh.points = mesh.points @ world[:3, :3].T + world[:3, 3]
+          mesh.points = part_points
+          mesh.compute_normals(cell_normals=False, inplace=True)
+          part_normals = mesh.point_data["Normals"].copy()
+          # Part.transform already includes ancestors. Vertices and normals are rows.
+          rotation = part.transform[:3, :3]
+          mesh.points = part_points @ rotation.T + part.transform[:3, 3]
+          mesh.point_data["Normals"] = part_normals @ rotation.T
           meshes.append(mesh)
-          self._part_meshes.append((part, mesh, part_points))
+          self._part_meshes.append((part, mesh, part_points, part_normals))
 
   def show(self, show_collisions: bool = True) -> None:
     """Draw meshes, collision visibility, and degree/meter sliders for MJCF joints."""
@@ -58,6 +61,7 @@ class Viewer:
         smooth_shading=True,
       )
       visual_actors.append(actor)
+      self._mesh_actors[id(mesh)] = actor
     for index, mesh in enumerate(self.collision_meshes):
       actor = self.plotter.add_mesh(
         mesh,
@@ -67,6 +71,7 @@ class Viewer:
         line_width=1.5,
       )
       collision_actors.append(actor)
+      self._mesh_actors[id(mesh)] = actor
 
     if collision_actors:
 
@@ -109,8 +114,11 @@ class Viewer:
     for robot, joint in controls:
       positions = np.array([part.transform[:3, 3] for part in robot.parts.values()])
       length = max(float(np.linalg.norm(np.ptp(positions, axis=0))), 0.1) * 0.25
-      axis_mesh = _joint_arrow(robot, joint, length)
-      self._joint_axes.append((robot, joint, axis_mesh, length))
+      axis_mesh = pv.Arrow(direction=joint.axis, scale=length, shaft_radius=0.02, tip_radius=0.07)
+      axis_points = axis_mesh.points.copy()
+      frame = robot.joint_world_frame(joint.name)
+      axis_mesh.points = axis_points @ frame[:3, :3].T + frame[:3, 3]
+      self._joint_axes.append((robot, joint, axis_mesh, axis_points, length))
       color = "#16803c" if joint.kind == "sliding" else "#2563eb"
       self.plotter.add_mesh(
         axis_mesh, name=f"joint_axis_{len(self._joint_axes) - 1}", color=color, lighting=False
@@ -191,38 +199,32 @@ class Viewer:
     # PyVista also calls the callback when it first creates each slider.
     if np.isclose(value, joint.value, atol=1e-12, rtol=0):
       return
-    robot.set_joint_value(joint.name, value)
-    for part, mesh, part_points in self._part_meshes:
-      mesh.points = part_points @ part.transform[:3, :3].T + part.transform[:3, 3]
-      mesh.compute_normals(inplace=True)
-    # Smooth shading can create a derived dataset; point the actors at the updated meshes.
-    for prefix, meshes in (("mesh", self.meshes), ("collision", self.collision_meshes)):
-      for index, mesh in enumerate(meshes):
-        self.plotter.actors[f"{prefix}_{index}"].mapper.dataset = mesh
-    self._update_joint_axes()
+    updated = robot.set_joint_value(joint.name, value)
+    for part, mesh, part_points, part_normals in self._part_meshes:
+      if part not in updated:
+        continue
+      rotation = part.transform[:3, :3]
+      mesh.points = part_points @ rotation.T + part.transform[:3, 3]
+      # A rigid rotation changes normal directions without changing mesh connectivity.
+      mesh.point_data["Normals"] = part_normals @ rotation.T
+      # Smooth shading can create a derived dataset; reuse the actor captured in show().
+      self._mesh_actors[id(mesh)].mapper.dataset = mesh
+    self._update_joint_axes(updated)
     self.plotter.reset_camera_clipping_range()
     self.plotter.render()
 
-  def _update_joint_axes(self) -> None:
-    points = []
-    for robot, joint, mesh, length in self._joint_axes:
-      mesh.copy_from(_joint_arrow(robot, joint, length))
+  def _update_joint_axes(self, updated: set[Part] | None = None) -> None:
+    if self._joint_label_points is None:
+      return
+    points = self._joint_label_points.points.copy()
+    for index, (robot, joint, mesh, axis_points, length) in enumerate(self._joint_axes):
+      if updated is not None and joint.child not in updated:
+        continue
       frame = robot.joint_world_frame(joint.name)
+      mesh.points = axis_points @ frame[:3, :3].T + frame[:3, 3]
       direction = frame[:3, :3] @ joint.axis
-      points.append(frame[:3, 3] + length * direction)
-    if self._joint_label_points is not None:
-      self._joint_label_points.points = np.asarray(points)
-
-
-def _joint_arrow(robot: Robot, joint: Joint, length: float) -> pv.PolyData:
-  frame = robot.joint_world_frame(joint.name)
-  return pv.Arrow(
-    start=frame[:3, 3],
-    direction=frame[:3, :3] @ joint.axis,
-    scale=length,
-    shaft_radius=0.02,
-    tip_radius=0.07,
-  )
+      points[index] = frame[:3, 3] + length * direction
+    self._joint_label_points.points = points
 
 
 def _geometry_mesh(geometry: Geometry) -> pv.PolyData:
