@@ -147,7 +147,9 @@ class Viewer:
         title += " (preview)"
       y = 0.9 - index * spacing
       widget = self.plotter.add_slider_widget(
-        partial(self._set_joint_value, robot, joint),
+        partial(
+          self._set_joint_value, robot, joint
+        ),  # fix the first two arguments as this robot, this joint
         (lower, upper),
         value=joint.value,
         title="",
